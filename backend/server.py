@@ -106,6 +106,9 @@ def user_public(uid, viewer=None):
     u = row('SELECT id,username,nickname,last_seen,avatar_id FROM users WHERE id=?', (uid,))
     if u:
         u.update(bots.public(uid))
+        if 'membership' in globals():
+            u['member']=membership.active(uid)
+            if viewer==uid:u['membership']=membership.status(uid)
         u['online'] = bool(online.get(uid))
         if viewer==uid and 'moderation' in globals():
             staff=moderation.staff(uid)
@@ -227,7 +230,7 @@ async def errors(request, handler):
 
 @web.middleware
 async def authentication(request, handler):
-    if request.path.startswith('/api/') and request.path not in ('/api/register', '/api/login', '/api/health', '/api/app-release', '/api/auth/code', '/api/password/reset'):
+    if request.path.startswith('/api/') and request.path not in ('/api/register', '/api/login', '/api/health', '/api/app-release', '/api/auth/code', '/api/password/reset', '/api/payments/notify'):
         token=request.headers.get('Authorization', '').removeprefix('Bearer ')
         request['uid'] = bots.authorize(request,token) if token.startswith('qlb_') else auth(token)
         if request.path.startswith('/api/bot/') and not request.get('bot_token'): reject('请使用机器人专用凭证',403)
@@ -237,7 +240,7 @@ async def authentication(request, handler):
 def public_plaza_open(): return os.environ.get('QINGLIAO_PUBLIC_PLAZA', '0') == '1'
 
 
-async def health(request): return web.json_response({'ok': True, 'app': 'qingliao', 'version': '1.19.0', 'app_updates':True, 'moderation': True, 'require_email': security.require_email, 'require_e2ee': security.require_e2ee, 'bot_api': 'webhook-v1', 'bot_calls':True,'moments_media':True,'moments_public':public_plaza_open(),'moments_video_covers':True,'bot_calls_default_allowed':True,'call_busy_feedback':True})
+async def health(request): return web.json_response({'ok': True, 'app': 'qingliao', 'version': '1.20.0', 'app_updates':True, 'membership':True,'moderation': True, 'require_email': security.require_email, 'require_e2ee': security.require_e2ee, 'bot_api': 'webhook-v1', 'bot_calls':True,'moments_media':True,'moments_public':public_plaza_open(),'moments_video_covers':True,'bot_calls_default_allowed':True,'call_busy_feedback':True})
 
 
 async def register(request):
@@ -965,6 +968,7 @@ async def maintenance(app):
             if not c['accepted'] and now() - c['created'] > 45000: await finish_call(c, 'timeout')
             elif c['accepted'] and not c.get('connected') and now() - c['accepted_at'] > 45000: await finish_call(c, 'failed')
         if t - last_seen_sync >= 30:
+            await membership.expire()
             db.executemany('UPDATE users SET last_seen=? WHERE id=?', [(now(), uid) for uid in online])
             db.commit()
             last_seen_sync = t
@@ -1028,6 +1032,8 @@ from moderation import Moderation
 moderation=Moderation(globals())
 from releases import Releases
 releases=Releases(globals())
+from membership import Membership
+membership=Membership(globals())
 guard.migrate_emails()
 guard.reap()
 last_message_time = row('SELECT coalesce(max(created),0) AS n FROM messages')['n']
@@ -1048,6 +1054,7 @@ botcalls.routes(app)
 momentmedia.routes(app)
 moderation.routes(app)
 releases.routes(app)
+membership.routes(app)
 app.on_shutdown.append(shutdown)
 app.add_routes([
     web.get('/api/health', health), web.post('/api/register', register), web.post('/api/login', login),

@@ -8,8 +8,8 @@ android {
         applicationId = "cn.qingliao.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 29
-        versionName = "2.9.1"
+        versionCode = 30
+        versionName = "2.10.0"
         testInstrumentationRunner = "cn.qingliao.app.CryptoInstrumentation"
         buildConfigField("boolean", "FORCE_RELAY", (project.findProperty("forceRelay") == "true").toString())
         ndk { abiFilters += if (project.findProperty("phoneBuild") == "true") listOf("arm64-v8a", "armeabi-v7a") else listOf("arm64-v8a", "armeabi-v7a", "x86_64") }
@@ -33,6 +33,7 @@ android {
     }
 }
 dependencies {
+    implementation("com.google.zxing:core:3.5.3")
     implementation("com.google.crypto.tink:tink-android:1.23.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("io.github.webrtc-sdk:android:150.7871.01")

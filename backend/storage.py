@@ -15,10 +15,10 @@ class Storage:
         day=int(time.time()//86400)
         today=row('SELECT bytes FROM upload_usage WHERE owner=? AND day=?',(uid,day)) or {'bytes':0}
         fresh=self.c['now']()-row('SELECT created FROM users WHERE id=?',(uid,))['created']<86400000
-        return web.json_response({'used':media['bytes']+avatar+moments,'quota':self.c['guard'].MAX_USER_MEDIA,
+        return web.json_response({'used':media['bytes']+avatar+moments,'quota':self.c['guard'].media_limit(uid),
             'sent':media['bytes']-pending['bytes'],'pending':pending['bytes'],'pending_files':pending['files'],
             'avatar':avatar,'moments':moments,'files':media['files'],'upload_today':today['bytes'],
-            'upload_daily_limit':(32 if fresh else 128)*1024*1024,'resets_at':(day+1)*86400000})
+            'upload_daily_limit':self.c['guard'].daily_limit(uid,fresh),'resets_at':(day+1)*86400000})
 
     async def files(self,request):
         uid=request['uid'];before=request.query.get('before','~')

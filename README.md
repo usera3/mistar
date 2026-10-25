@@ -20,6 +20,7 @@
 - **账号与管理**：邮箱验证、注册登录、密码找回/修改，管理员动态审核、限发、封禁与强制下线。
 - **开发者机器人**：直接发送 API + 签名 Webhook，无事件轮询；支持文字、HTML、图片、语音、文件及机器人音视频通话。
 - **更新**：固定 HTTPS 下载、实时更新提示、大小/SHA-256/原签名检查，由用户交系统安装器确认。
+- **会员与支付**：月卡/季卡/年卡，支付宝付款、本人订单、到账后开通与续费；500MiB存储、每日256MiB上传及会员头像框。非自动续费，详见 [MEMBERSHIP.md](MEMBERSHIP.md)。
 
 <p><img src="docs/images/login.png" width="230" alt="手机登录界面"> <img src="docs/images/watch-login.png" width="230" alt="Android 9 手表登录界面"></p>
 
@@ -60,7 +61,7 @@ python tools/run_backend_tests.py
 
 ## 协议与使用说明
 
-[消息操作](MESSAGE_ACTIONS.md) · [机器人 API](BOT_API.md) · [机器人通话](BOT_CALLS.md) · [语音输入](DICTATION.md) · [屏幕共享](SCREENSHARE.md) · [管理员](ADMIN.md) · [更新发布](UPDATES.md) · [资源与滥用限制](DEFENSE.md)
+[消息操作](MESSAGE_ACTIONS.md) · [会员与支付](MEMBERSHIP.md) · [机器人 API](BOT_API.md) · [机器人通话](BOT_CALLS.md) · [语音输入](DICTATION.md) · [屏幕共享](SCREENSHARE.md) · [管理员](ADMIN.md) · [更新发布](UPDATES.md) · [资源与滥用限制](DEFENSE.md)
 
 ## 加密与边界
 

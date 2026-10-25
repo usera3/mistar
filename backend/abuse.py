@@ -166,6 +166,7 @@ class Defense:
         elif request.path=='/api/post-media':limit=(5 if request.query.get('kind')=='voice' else 25)*MIB
         elif re.fullmatch(r'/api/post-media/[a-f0-9]{32}/cover',request.path):limit=self.c['MAX_AVATAR']
         elif request.path in ('/api/me/avatar','/api/post-photos'):limit=self.c['MAX_AVATAR']
+        elif request.path=='/api/payments/notify':limit=8192
         if request.content_length is not None and request.content_length>limit: self.reject('请求内容过大',413)
         request['body_limit']=limit
         if is_ws:
@@ -196,13 +197,19 @@ class Defense:
     def user_media(self, uid):
         return self.c['row']('SELECT (SELECT coalesce(sum(size),0) FROM uploads WHERE owner=?)+(SELECT coalesce(sum(size),0) FROM avatars WHERE owner=?)+(SELECT coalesce(sum(size),0) FROM post_photos WHERE owner=?) AS bytes',(uid,uid,uid))['bytes']
 
+    def media_limit(self,uid):
+        return self.c['membership'].media_limit(uid) if self.c.get('membership') else self.MAX_USER_MEDIA
+
+    def daily_limit(self,uid,fresh):
+        return self.c['membership'].daily_limit(uid,fresh) if self.c.get('membership') else (32 if fresh else 128)*MIB
+
     def storage_check(self, request, amount, credit=0):
         if self.c.get('moderation'):self.c['moderation'].check_request(request)
         uid=request['uid'];own=id(request)
         pending=sum(v[1] for k,v in self.reserved.items() if k!=own)
         user_pending=sum(v[1] for k,v in self.reserved.items() if k!=own and v[0]==uid)
         if self.c['storage_used']()+pending+amount-credit>self.c['MAX_STORAGE']: self.reject('服务器附件空间已满',507)
-        if self.user_media(uid)+user_pending+amount-credit>self.MAX_USER_MEDIA:self.reject('账号附件空间已满，请联系管理员处理',507)
+        if self.user_media(uid)+user_pending+amount-credit>self.media_limit(uid):self.reject('账号附件空间已满，请清理附件或检查会员额度',507)
         if shutil.disk_usage(self.c['DATA']).free<self.MIN_FREE+amount:self.reject('服务器剩余空间不足',507)
 
     @asynccontextmanager
@@ -218,21 +225,23 @@ class Defense:
         day=int(time.time()//86400)
         user=self.c['row']('SELECT created FROM users WHERE id=?',(uid,))
         fresh=self.c['now']()-user['created']<86400000
-        maximum=(32 if fresh else 128)*MIB
+        member=bool(self.c.get('membership') and self.c['membership'].active(uid))
+        maximum=self.daily_limit(uid,fresh)
+        new_budget=fresh and not member
         used=self.c['row']('SELECT bytes FROM upload_usage WHERE owner=? AND day=?',(uid,day))
         if (used['bytes'] if used else 0)+amount>maximum:self.reject('今日上传额度已用完，请明天再试',429)
-        if fresh:
+        if new_budget:
             shared=self.c['row']("SELECT bytes FROM upload_usage WHERE owner='new-accounts' AND day=?",(day,))
             if (shared['bytes'] if shared else 0)+amount>128*MIB:self.reject('新账号今日上传额度已用完，请明天再试',429)
         self.reserved[id(request)]=(uid,amount)
-        for key in (uid,'new-accounts') if fresh else (uid,):
+        for key in (uid,'new-accounts') if new_budget else (uid,):
             self.db.execute('INSERT INTO upload_usage VALUES(?,?,?) ON CONFLICT(owner,day) DO UPDATE SET bytes=bytes+excluded.bytes',(key,day,amount))
         self.db.commit()
         try:
             yield
             refund=max(0,amount-request.get('body_bytes',amount))
             if refund:
-                for key in (uid,'new-accounts') if fresh else (uid,):
+                for key in (uid,'new-accounts') if new_budget else (uid,):
                     self.db.execute('UPDATE upload_usage SET bytes=max(0,bytes-?) WHERE owner=? AND day=?',(refund,key,day))
                 self.db.commit()
         finally:self.reserved.pop(id(request),None)
@@ -253,7 +262,7 @@ class Defense:
                 data=bytearray()
                 async for part in self.chunks(request,request['body_limit']):data.extend(part)
                 request._read_bytes=bytes(data)
-                if data:
+                if data and request.path!='/api/payments/notify':
                     parsed=json.loads(data)
                     if not isinstance(parsed,dict):self.reject('请求格式不正确')
             try:await asyncio.wait_for(read(),self.JSON_TIMEOUT)

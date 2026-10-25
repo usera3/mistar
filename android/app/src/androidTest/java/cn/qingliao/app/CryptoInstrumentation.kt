@@ -22,6 +22,7 @@ class CryptoInstrumentation:Instrumentation() {
     override fun onStart() {
         try {
             waitForIdleSync()
+            if(mode=="membership"){val result=MembershipTests.run(this);finish(Activity.RESULT_OK,Bundle().apply{putString("result",result)});return}
             if(mode=="brandSeed"||mode=="brandVerify"){val result=BrandingTests.run(this,mode=="brandSeed");finish(Activity.RESULT_OK,Bundle().apply{putString("result",result)});return}
             if(mode=="messageInteractions"){val result=MessageInteractionTests.run(this);finish(Activity.RESULT_OK,Bundle().apply{putString("result",result)});return}
             if(mode=="updates"||mode=="updatesInstall"){val result=UpdateTests.run(this,mode=="updatesInstall");finish(Activity.RESULT_OK,Bundle().apply{putString("result",result)});return}

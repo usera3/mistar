@@ -342,6 +342,7 @@ object Hub {
             }
             "ready" -> { connected=true;reconnect=0;authDeadline?.let{main.removeCallbacks(it)};authDeadline=null;typingUntil.clear();saveMe(p.getJSONObject("user"));service?.update();resyncCall();LocalHistory.synchronize();Outbox.kick() }
             "me.updated" -> saveMe(p.getJSONObject("user"))
+            "membership.updated" -> p.optJSONObject("membership")?.let{saveMe(JSONObject(me.toString()).put("membership",it).put("member",it.optBoolean("active")))}
             "typing" -> {
                 val peer = p.optString("peer")
                 if (p.optBoolean("active")) typingUntil[peer] = SystemClock.elapsedRealtime() + 5000 else typingUntil.remove(peer)
@@ -390,6 +391,7 @@ object Hub {
             "call.peer_reconnected" -> if(p.optString("call_id")==call?.optString("id"))rtc?.requestRestart()
             "call.ended" -> {if(p.optString("call_id")==pendingHangup)pendingHangup="";if(p.optString("call_id")==call?.optString("id"))endLocalCall()}
         }
+        if(p.optString("event") in listOf("ready","me.updated","membership.updated"))MembershipEvents.publish(p)
         LocalHistory.event(p);emit(p)
     }
     fun endLocalCall() {

@@ -276,6 +276,7 @@ class MainActivity : Activity() {
             addView(text(u.optString("nickname", "星").take(1),size*.36f,accent,true).apply { gravity=Gravity.CENTER },FrameLayout.LayoutParams(-1,-1))
             val image=ImageView(this@MainActivity).apply { scaleType=ImageView.ScaleType.CENTER_CROP; contentDescription="头像照片"; visibility=View.GONE }
             addView(image,FrameLayout.LayoutParams(-1,-1)); AvatarImages.load(u.optString("avatar_id"),image)
+            if(MemberUi.active(u))addView(MemberFrame(this@MainActivity),FrameLayout.LayoutParams(-1,-1))
         }
     }
     private fun reset(color: Int = canvas) {
@@ -622,7 +623,7 @@ class MainActivity : Activity() {
         portrait.addView(camera,FrameLayout.LayoutParams(dp(24),dp(24),Gravity.BOTTOM or Gravity.END)); identity.addView(portrait,lp(72,72))
         val info=col().apply { setPadding(dp(16),0,0,0) }
         info.addView(text(Hub.me.optString("nickname"),22f,ink,true).apply { maxLines=1; ellipsize=android.text.TextUtils.TruncateAt.END }); space(info,8)
-        info.addView(text("点按更换头像",12f,accent).apply { setOnClickListener { avatarMenu() } })
+        info.addView(text(if(MemberUi.active(Hub.me))"✦ 弥星会员 · 点按更换头像"else"点按更换头像",12f,accent).apply { setOnClickListener { avatarMenu() } })
         identity.addView(info,LinearLayout.LayoutParams(0,-2,1f)); card.addView(identity,lp()); space(card,22)
         val id=row().apply { contentDescription="复制弥星号"; touch(this,Color.TRANSPARENT,8); setOnClickListener { (getSystemService(CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("弥星号",Hub.me.optString("id"))); toast("弥星号已复制") } }
         id.addView(text("弥星号  "+Hub.me.optString("id"),13f,accent),LinearLayout.LayoutParams(0,-2,1f)); id.addView(Glyph(this,"copy",accent),lp(16,16)); card.addView(id,lp(-1,30))
@@ -635,6 +636,10 @@ class MainActivity : Activity() {
             if(action!=null) { r.addView(Glyph(this,"arrow",Color.rgb(178,185,196)),lp(16,16)); r.setOnClickListener { action() } }
             group.addView(r,lp()); if(!last)divider(group,60)
         }
+        section(parent,"弥星会员")
+        val membership=col().apply{background=StarlightDrawable(palette,dp(18).toFloat());clipToOutline=true}
+        setting(membership,"star","会员与订单",if(MemberUi.active(Hub.me))"已开通 · 查看权益"else"500MB · 专属标识",true){startActivity(Intent(this,MembershipActivity::class.java));Motion.activityOpen(this)}
+        parent.addView(membership,lp())
         if(Hub.me.optBoolean("administrator")){
             section(parent,"平台管理")
             val management=col().apply{background=bg(Color.WHITE,18);clipToOutline=true}
