@@ -1,0 +1,8 @@
+{
+  "extensionVersion": "0.5.7",
+  "userProvidedArchiveSha256": "a46ca5007f2780e8ae54b48768efa2653e556c68a1612495efd3f95b8208835a",
+  "concentusCommit": "3885c4e46513ef0fc81fca100189e54f1714c6ca",
+  "concentusSource": "https://github.com/lostromb/concentus",
+  "codecJavaFiles": 124,
+  "noUserCredentials": true
+}

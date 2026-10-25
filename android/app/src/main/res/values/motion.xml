@@ -1,0 +1,10 @@
+<resources>
+    <style name="QingMotionSheet">
+        <item name="android:windowEnterAnimation">@anim/sheet_enter</item>
+        <item name="android:windowExitAnimation">@anim/sheet_exit</item>
+    </style>
+    <style name="QingMotionGallery">
+        <item name="android:windowEnterAnimation">@anim/gallery_enter</item>
+        <item name="android:windowExitAnimation">@anim/gallery_exit</item>
+    </style>
+</resources>

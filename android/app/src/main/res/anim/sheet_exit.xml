@@ -1,0 +1,4 @@
+<set xmlns:android="http://schemas.android.com/apk/res/android" android:interpolator="@interpolator/qing_ease" android:shareInterpolator="true">
+    <translate android:fromYDelta="0" android:toYDelta="8%" android:duration="160" />
+    <alpha android:fromAlpha="1" android:toAlpha="0" android:duration="140" />
+</set>

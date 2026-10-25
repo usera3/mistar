@@ -1,0 +1,75 @@
+<p align="center"><img src="distribution/icon.svg" width="88" alt="弥星图标"></p>
+
+# 弥星 Mistar
+
+原生 Android 即时通讯应用：文字、图片、语音、文件、音视频通话、屏幕共享与好友动态。支持 Android 8.0+ 手机，以及 Android 9、410×502 等小屏手表。
+
+[![CI](https://github.com/usera3/mistar/actions/workflows/ci.yml/badge.svg)](https://github.com/usera3/mistar/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-7660D5.svg)](LICENSE)
+
+**[下载 Android 版](https://api.claudcode.xyz/xingyu/download/)** · [版本记录](CHANGELOG.md) · [自行部署](SELF_HOST.md) · [参与开发](CONTRIBUTING.md)
+
+## 功能
+
+- **聊天**：文字、HTML 排版卡片、图片、语音和最大 25 MiB 文件；左右头像、输入状态、最近在线、未读与已读。
+- **消息操作**：深灰双排长按浮层、原生文字选区及部分复制、引用、删除/撤回、多选、批量删除和逐条转发；转发附件重新加密。
+- **音视频**：用户间语音/视频通话，视频通话共享屏幕，系统授权及通知停止，断线与忙线反馈。
+- **语音转文字**：长按语音选择“转文字”即开始，原消息下展示进度与文字；另有麦克风听写、预览和手动发送。
+- **好友动态**：文字、图片、视频、语音、视频静态封面、点赞、评论及草稿。公共广场默认关闭。
+- **个人与主题**：头像裁剪、昵称、自选主题颜色；默认紫色星光与岛屿风格。
+- **账号与管理**：邮箱验证、注册登录、密码找回/修改，管理员动态审核、限发、封禁与强制下线。
+- **开发者机器人**：直接发送 API + 签名 Webhook，无事件轮询；支持文字、HTML、图片、语音、文件及机器人音视频通话。
+- **更新**：固定 HTTPS 下载、实时更新提示、大小/SHA-256/原签名检查，由用户交系统安装器确认。
+
+<p><img src="docs/images/login.png" width="230" alt="手机登录界面"> <img src="docs/images/watch-login.png" width="230" alt="Android 9 手表登录界面"></p>
+
+## 源码结构
+
+| 目录 | 内容 |
+| --- | --- |
+| `android/` | Kotlin 原生客户端、Gradle Wrapper、独立原生测试 APK |
+| `backend/` | aiohttp + SQLite 后端、隔离测试及 systemd/nginx/TURN 模板 |
+| `bot-examples/` | Python REST/Webhook 消息示例及可选 aiortc 通话示例 |
+| `distribution/` | 静态下载页面与图标 |
+| `tools/` | 隔离后端测试和公开源码检查 |
+
+## 构建 Android
+
+需要 JDK 21、Android SDK Platform 36 / Build Tools 35.0.0。AGP 8.11.1、Kotlin 2.1.20、Gradle 8.13 已在项目中固定。
+
+```sh
+cd android
+./gradlew :app:assembleDebug
+# Windows: gradlew.bat :app:assembleDebug
+```
+
+输出为 `android/app/build/outputs/apk/debug/app-debug.apk`。通过 `ANDROID_HOME` 或本机 `android/local.properties` 配置 SDK；不要提交本机路径。正式构建使用自己的签名密钥，通过 `QINGLIAO_KEYSTORE` 和 `QINGLIAO_SIGN_PASSWORD` 提供，仓库不含官方签名材料。独立原生测试的 `testBuildType` 为 `release`，需要为主/测试包提供同一测试签名。
+
+默认客户端连接现有公开服务；自行部署时请按 [SELF_HOST.md](SELF_HOST.md) 配置服务地址、信任证书、TURN 和独立的更新签名。自行签名的 APK 不能覆盖官方签名的安装包；不要为了安装开发版卸载存有聊天身份的官方客户端。
+
+## 运行后端与测试
+
+```sh
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install -r backend/requirements.txt
+python tools/run_backend_tests.py
+```
+
+测试在独立进程和临时数据库中运行，验证码在内存捕获，不连接真实邮箱、不联系真实用户。服务端环境变量见 `backend/.env.example`；程序直接读取进程环境，部署配置方法见 [SELF_HOST.md](SELF_HOST.md)。
+
+## 协议与使用说明
+
+[消息操作](MESSAGE_ACTIONS.md) · [机器人 API](BOT_API.md) · [机器人通话](BOT_CALLS.md) · [语音输入](DICTATION.md) · [屏幕共享](SCREENSHARE.md) · [管理员](ADMIN.md) · [更新发布](UPDATES.md) · [资源与滥用限制](DEFENSE.md)
+
+## 加密与边界
+
+普通用户之间的新私聊正文、附件和通话信令采用 Tink HPKE/签名及分段附件认证；本机聊天身份、会话和缓存使用 Android Keystore/AES-GCM。没有实现 Signal Double Ratchet，也未经过独立安全审计。机器人内容由后端和开发者处理；头像、好友动态及其媒体不属于私聊端到端加密范围。语音识别由第三方在线服务处理用户主动选择的声音。完整说明见 [SECURITY.md](SECURITY.md)。
+
+后台消息依赖连接常驻服务；应用被系统强行停止后需重新打开。尚无群聊、跨设备接管通话或 iOS 客户端。测试覆盖自有手机/手表模拟器与合成媒体，没有真机适配承诺。
+
+仓库包含客户端、后端与通用机器人示例，不包含线上数据库、用户内容、签名密钥、SMTP/机器人/模型凭据，也不包含 Miko 的个人知识图谱、图片库或语音模型。
+
+## 许可
+
+项目原创代码以 [MIT](LICENSE) 开源；Concentus、Gradle Wrapper 及其他第三方组件保留原许可，见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

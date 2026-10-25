@@ -1,0 +1,139 @@
+{
+  "crypto": [
+    {
+      "private": "1",
+      "public": "04161FF7528B899B2D0C28607CA52C5B86CF5AC8395BAFEB13C02DA292DDED7A83",
+      "peer": "04D610B139835E3005503E1D5921F9730E65E3052B09A8BCCBAE30CED26F0A6B0F",
+      "shared": "D610B139835E3005503E1D5921F9730E"
+    },
+    {
+      "private": "2",
+      "public": "048151A0C6B92171DB199DB84BE753A97E03D853559455CAAE838395A9275B7E95",
+      "peer": "04D610B139835E3005503E1D5921F9730E65E3052B09A8BCCBAE30CED26F0A6B0F",
+      "shared": "C12E0C43C6E05F68E270AF84957CAFEF"
+    },
+    {
+      "private": "1512366075204170929049582354406559215",
+      "public": "041BB9273D32CFCD5BB09750DD50AF91B3CBC8EC11842ECA82183475B8454441A5",
+      "peer": "04D610B139835E3005503E1D5921F9730E65E3052B09A8BCCBAE30CED26F0A6B0F",
+      "shared": "3F3B64319EAEAC56548879E1CEED852B"
+    }
+  ],
+  "headers": [
+    {
+      "kind": "dh",
+      "task": 2147483646,
+      "body": "6669787475726520656e6372797074656420626f6479206461746121",
+      "expected": {
+        "Kb-OsType": "1",
+        "Kb-Version": "4.0.0.58119",
+        "Kb-SystemVersion": "34",
+        "Kb-PackageType": "2",
+        "Kb-TimeStamp": "1777777777777",
+        "Kb-BodyMd5": "3D9AD9A55F4D2D8D8785DC1FF04F24AB",
+        "Kb-TraceId": "abcdefghijklmnop",
+        "Kb-TaskId": "2147483646",
+        "Kb-Scene": "2",
+        "Kb-CompressionType": "1",
+        "Content-Type": "application/octet-stream",
+        "Use_DebugNet": "0",
+        "Kb-Uin": "123456789",
+        "Kb-DeviceCodeRestrictionV2": "1",
+        "Kb-Sign": "D20BFE385418697D9CE8729F9A8DAD36E43DA19EF881AC83B4EE76D4F74EAB70"
+      }
+    },
+    {
+      "kind": "uin",
+      "task": 2147483645,
+      "body": "6669787475726520656e6372797074656420626f6479206461746121",
+      "expected": {
+        "Kb-OsType": "1",
+        "Kb-Version": "4.0.0.58119",
+        "Kb-SystemVersion": "34",
+        "Kb-PackageType": "2",
+        "Kb-TimeStamp": "1777777777777",
+        "Kb-BodyMd5": "3D9AD9A55F4D2D8D8785DC1FF04F24AB",
+        "Kb-TraceId": "abcdefghijklmnop",
+        "Kb-TaskId": "2147483645",
+        "Kb-Scene": "2",
+        "Kb-CompressionType": "1",
+        "Content-Type": "application/octet-stream",
+        "Use_DebugNet": "0",
+        "Kb-GenUinToken": "fixture-registration-token",
+        "Kb-DeviceCodeRestrictionV2": "1",
+        "Kb-Sign": "03CD52114B76BCE4F2E8C61709897267F1DD137063F5A09C57934CF1566A9DC0"
+      }
+    },
+    {
+      "kind": "api",
+      "task": 123,
+      "body": "6669787475726520656e6372797074656420626f6479206461746121",
+      "expected": {
+        "Kb-OsType": "1",
+        "Kb-Version": "4.0.0.58119",
+        "Kb-SystemVersion": "34",
+        "Kb-PackageType": "2",
+        "Kb-TimeStamp": "1777777777777",
+        "Kb-BodyMd5": "3D9AD9A55F4D2D8D8785DC1FF04F24AB",
+        "Kb-TraceId": "abcdefghijklmnop",
+        "Kb-TaskId": "123",
+        "Kb-Scene": "2",
+        "Kb-CompressionType": "1",
+        "Content-Type": "application/octet-stream",
+        "Use_DebugNet": "0",
+        "Kb-Uin": "123456789",
+        "Kb-SharedKeySuffix": "CDEF",
+        "Kb-CmdId": "4547",
+        "Kb-SubCmdId": "0",
+        "Kb-Sign": "A96AD5CD3BCF64E083165F577CF55732525859D5D15E9B3E638514CA70CD9EBF"
+      }
+    }
+  ],
+  "aes": [
+    {
+      "plain": "",
+      "cipher": "ee67d3547858e5a67887ae200e30c517",
+      "key": "G7E1C8B0D7D7E4L3J2U9D6W0B2M8Q6O5"
+    },
+    {
+      "plain": "66697874757265",
+      "cipher": "5addf501176ca8701a0fdf2f448baf53",
+      "key": "G7E1C8B0D7D7E4L3J2U9D6W0B2M8Q6O5"
+    },
+    {
+      "plain": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff",
+      "cipher": "2bbcc20dc73009ca11ea3502ad9148d4cf0c73d71d527cd5bf3aa3a219bdf05b01aab2d7589eb26dcd23e5b57fb2a87be3bf3611feb87bb76b959ad2fac8bac95b783618ee05ac3c0ef5bcca44143cd0d1b7fd3dc57af6966812bba38d414ebb5ff19ba4b379a68a46f6f1c329f5874f49d243c628a1ea786d2ee40bdb66a9c81750bf71ce4862658d27683857bf74f331ca917972bc183c00ecf4997a3b609484fb215cf95309d7b07cc5c8739b59e7eff20bc4149df4f90f2ba2aeea76f8c4967036b024ea665986bfdf814c6fab97f97dd674919433bb03977a1292aeb18076004b30c959a9e4dafb208ef1e317ddf5c1eb78686da200c5d760dc9b44f9b8ee67d3547858e5a67887ae200e30c517",
+      "key": "G7E1C8B0D7D7E4L3J2U9D6W0B2M8Q6O5"
+    },
+    {
+      "plain": "78787878787878787878787878787878",
+      "cipher": "c35ea021e05f6bd6252710dfac81f879ee67d3547858e5a67887ae200e30c517",
+      "key": "G7E1C8B0D7D7E4L3J2U9D6W0B2M8Q6O5"
+    }
+  ],
+  "dh": "0a42303431363146463735323842383939423244304332383630374341353243354238364346354143383339354241464542313343303244413239324444454437413833120018012240414e447878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787832003a00420b42726f77736572204153524a00",
+  "uin": "0a40414e447878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787812423034313631464637353238423839394232443043323836303743413532433542383643463541433833393542414645423133433032444132393244444544374138332214666978747572652d696e7374616c6c6174696f6e2a00",
+  "voice": [
+    {
+      "seq": 1,
+      "audio": "616263",
+      "end": false,
+      "total": 3,
+      "expected": "0a1a120d766f6963652d666978747572652203616263280538015803"
+    },
+    {
+      "seq": 2,
+      "audio": "",
+      "end": true,
+      "total": 3,
+      "expected": "0a17120d766f6963652d666978747572652805300138025803"
+    },
+    {
+      "seq": 0,
+      "audio": "",
+      "end": true,
+      "total": 3,
+      "expected": "0a15120d766f6963652d66697874757265280530015803"
+    }
+  ]
+}

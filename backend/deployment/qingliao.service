@@ -1,0 +1,25 @@
+[Unit]
+Description=Qingliao messaging backend
+After=network.target
+[Service]
+User=qingliao
+Group=qingliao
+WorkingDirectory=/opt/qingliao
+EnvironmentFile=/etc/qingliao/environment
+ExecStart=/usr/bin/python3 /opt/qingliao/server.py
+Restart=on-failure
+RestartSec=3
+MemoryMax=100M
+CPUQuota=80%
+TasksMax=32
+LimitNOFILE=1024
+LogRateLimitIntervalSec=30s
+LogRateLimitBurst=50
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+UMask=0077
+ReadWritePaths=/var/lib/qingliao
+[Install]
+WantedBy=multi-user.target

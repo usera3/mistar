@@ -1,0 +1,16 @@
+[Unit]
+Description=Qingliao WebRTC relay
+After=network.target
+[Service]
+User=turnserver
+Group=turnserver
+ExecStart=/usr/bin/turnserver -c /etc/qingliao/turnserver.conf --pidfile=
+Restart=on-failure
+RestartSec=3
+MemoryMax=90M
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+[Install]
+WantedBy=multi-user.target
