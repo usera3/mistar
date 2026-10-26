@@ -20,13 +20,17 @@ object LocalHistory {
     }
     fun homePart(owner:String,session:String,key:String,array:JSONArray,stamp:Long=LocalData.epoch(owner)){val copy=JSONArray(array.toString());persist(owner,session){if(stamp==LocalData.epoch(owner))LocalData.homePart(owner,key,copy)}}
     fun home(owner:String):JSONObject {
-        val result=LocalData.home(owner);val contacts=result.optJSONArray("contacts")?:JSONArray();val conversations=result.optJSONArray("conversations")?:JSONArray()
+        ConversationState.load(owner,Hub.token)
+        return withPending(owner,LocalData.home(owner))
+    }
+    fun withPending(owner:String,result:JSONObject):JSONObject {
+        val contacts=result.optJSONArray("contacts")?:JSONArray();val conversations=result.optJSONArray("conversations")?:JSONArray()
         val all=LocalData.pending(owner)
         for(i in 0 until all.length()) {
             val p=all.getJSONObject(i);val id=p.getString("recipient")
             val existing=(0 until conversations.length()).map{conversations.getJSONObject(it)}.find{it.getJSONObject("user").optString("id")==id}
             val user=existing?.optJSONObject("user")?:(0 until contacts.length()).map{contacts.getJSONObject(it)}.find{it.optString("id")==id}?:JSONObject().put("id",id).put("nickname","朋友")
-            if(existing!=null)existing.put("last",Outbox.pending(owner,p))else conversations.put(JSONObject().put("user",user).put("last",Outbox.pending(owner,p)).put("unread",0))
+            if(existing!=null){if(p.optLong("local_created")>=existing.getJSONObject("last").optLong("created"))existing.put("last",Outbox.pending(owner,p))}else conversations.put(JSONObject().put("user",user).put("last",Outbox.pending(owner,p)).put("unread",0))
         }
         return result.put("contacts",contacts).put("conversations",JSONArray((0 until conversations.length()).map{conversations.getJSONObject(it)}.sortedByDescending{it.getJSONObject("last").optLong("created")}))
     }

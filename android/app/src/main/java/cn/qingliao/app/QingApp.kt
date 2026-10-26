@@ -139,6 +139,8 @@ object Hub {
     }
     fun logout() {
         val old = token
+        runCatching{ConversationState.flush(me.optString("id"),old)}
+        ConversationState.clearMemory()
         val privateScreens=activities.keys.filter{it !is MainActivity}.toList()
         val mainScreens=activities.keys.filterIsInstance<MainActivity>().toList()
         main.post{privateScreens.forEach{if(!it.isFinishing)it.finish()}}
@@ -403,6 +405,7 @@ object Hub {
     }
     fun notify(title: String, text: String, peer: String, call: Boolean) {
         val owner=me.optString("id");if(token.isEmpty()||owner.isEmpty())return
+        if(!call&&ConversationState.muted(owner,peer))return
         val intent = Intent(app, MainActivity::class.java).putExtra("peer", peer).putExtra("owner",owner).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
         val pending = PendingIntent.getActivity(app, (owner+":"+peer).hashCode(), intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val publicVersion=NotificationCompat.Builder(app,if(call)"calls" else "messages").setSmallIcon(R.drawable.ic_notification).setContentTitle("弥星").setContentText(if(call)"有新的来电" else "有新的消息").build()

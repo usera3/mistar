@@ -12,6 +12,7 @@
 ## 功能
 
 - **聊天**：文字、HTML 排版卡片、图片、语音和最大 25 MiB 文件；左右头像、输入状态、最近在线、未读与已读。
+- **会话与草稿**：本机加密草稿（文字、引用、光标）、置顶、消息免打扰与连续消息列表；仅搜索本机保存的联系人、文字和文件名，支持定位上下文。
 - **消息操作**：深灰双排长按浮层、原生文字选区及部分复制、引用、删除/撤回、多选、批量删除和逐条转发；转发附件重新加密。
 - **音视频**：用户间语音/视频通话，视频通话共享屏幕，系统授权及通知停止，断线与忙线反馈。
 - **语音转文字**：长按语音选择“转文字”即开始，原消息下展示进度与文字；另有麦克风听写、预览和手动发送。
@@ -23,6 +24,10 @@
 - **会员与支付**：月卡/季卡/年卡，支付宝付款、本人订单、到账后开通与续费；500MiB存储、每日256MiB上传及会员头像框。非自动续费，详见 [MEMBERSHIP.md](MEMBERSHIP.md)。
 
 <p><img src="docs/images/login.png" width="230" alt="手机登录界面"> <img src="docs/images/watch-login.png" width="230" alt="Android 9 手表登录界面"></p>
+
+<p><img src="docs/images/conversations.png" width="230" alt="合成数据会话与草稿"> <img src="docs/images/chat-settings.png" width="230" alt="聊天设置与会话偏好"> <img src="docs/images/local-search.png" width="230" alt="本机搜索"></p>
+
+[会话体验对照、实现与验证范围](CHAT_EXPERIENCE.md)
 
 ## 源码结构
 

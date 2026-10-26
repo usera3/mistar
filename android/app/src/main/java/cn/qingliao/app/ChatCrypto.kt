@@ -88,6 +88,7 @@ object ChatCrypto {
                 check(prefs.edit().putString("identity:$uid",saved).remove("pending:$uid").commit())
                 stored=saved
                 LocalData.resetIdentity(uid)
+                ConversationState.clearMemory()
             }
         }
         val identity=if(stored!=null)JSONObject(String(openLocal(stored!!,uid),utf)) else {

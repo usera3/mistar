@@ -21,17 +21,17 @@ object Outbox {
         .put("sender",owner).put("recipient",p.getString("recipient")).put("type",p.getString("type")).put("text",p.optString("text"))
         .put("created",p.optLong("local_created",System.currentTimeMillis())).put("pending",true).put("send_state",p.optString("local_state","queued"))
         .put("send_error",p.optString("local_error")).apply{p.optJSONObject("private_file")?.let{put("file",it);put("file_id",it.optString("id"))};p.optJSONObject("quote")?.let{put("quote",it)}}
-    private fun enqueue(p:JSONObject,session:String,owner:String):JSONObject {
+    private fun enqueue(p:JSONObject,session:String,owner:String,clearDraft:Boolean=false):JSONObject {
         require(Hub.token==session&&Hub.me.optString("id")==owner){"登录状态已改变"}
         val inner=JSONObject().put("type",p.getString("type")).put("text",p.optString("text"));p.optJSONObject("private_file")?.let{inner.put("file",it)}
         p.optJSONObject("quote")?.let{inner.put("quote",it)}
         PayloadRules.validate(inner,p.optString("file_id"),setOf(owner,p.getString("recipient")))
-        return LocalData.queue(owner,JSONObject(p.toString()))
+        return if(clearDraft)ConversationState.queueText(owner,session,JSONObject(p.toString()))else LocalData.queue(owner,JSONObject(p.toString()))
     }
     fun queue(p:JSONObject,session:String=Hub.workSession(),owner:String=Hub.workOwner()):JSONObject {val stored=enqueue(p,session,owner);kick();return pending(owner,stored)}
-    fun queueAsync(p:JSONObject,done:(JSONObject)->Unit,error:(String)->Unit) {
+    fun queueAsync(p:JSONObject,done:(JSONObject)->Unit,error:(String)->Unit,clearDraft:Boolean=false) {
         val session=Hub.token;val owner=Hub.me.optString("id");val payload=JSONObject(p.toString())
-        LocalData.worker.execute{try{val result=queue(payload,session,owner);Hub.main.post{if(Hub.token==session)done(result)}}catch(e:Exception){Hub.main.post{if(Hub.token==session)error(e.message?:"待发消息无法保存")}}}
+        LocalData.worker.execute{try{val stored=enqueue(payload,session,owner,clearDraft);kick();val result=pending(owner,stored);Hub.main.post{if(Hub.token==session)done(result)}}catch(e:Exception){Hub.main.post{if(Hub.token==session)error(e.message?:"待发消息无法保存")}}}
     }
     fun send(p:JSONObject,session:String=Hub.workSession(),owner:String=Hub.workOwner()):JSONObject {
         val stored=enqueue(p,session,owner)

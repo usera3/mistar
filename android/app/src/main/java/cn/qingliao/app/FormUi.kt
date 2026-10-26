@@ -48,8 +48,8 @@ internal class FormUi(val context:Context,val p:ThemePalette) {
         setOnClickListener{if(isEnabled)click()}
     }
     fun section(parent:LinearLayout,title:String,subtitle:String=""){
-        gap(parent,20);parent.addView(text(title,15f,bold=true),lp())
-        if(subtitle.isNotEmpty()){gap(parent,5);parent.addView(text(subtitle,12f,p.muted),lp())};gap(parent,10)
+        gap(parent,if(tiny)10 else 20);parent.addView(text(title,if(tiny)13f else 15f,bold=true),lp())
+        if(subtitle.isNotEmpty()){gap(parent,5);parent.addView(text(subtitle,12f,p.muted),lp())};gap(parent,if(tiny)6 else 10)
     }
     inner class Field(title:String,hint:String,val key:String,secret:Boolean=false,maximum:Int=128,type:Int=InputType.TYPE_CLASS_TEXT) {
         val view=col()
