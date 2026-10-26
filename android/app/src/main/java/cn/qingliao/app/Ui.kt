@@ -12,6 +12,7 @@ class Glyph(context: Context, private val kind: String, var color: Int = Color.r
         fun line(vararg xy: Float) { val path = Path(); path.moveTo(xy[0], xy[1]); for (i in 2 until xy.size step 2) path.lineTo(xy[i], xy[i+1]); c.drawPath(path, p) }
         fun round(l: Float,t: Float,r: Float,b: Float,rad:Float=3f) { c.drawRoundRect(l,t,r,b,rad,rad,p) }
         when (kind) {
+            "eye" -> { val path=Path();path.moveTo(2f,12f);path.cubicTo(7f,3f,17f,3f,22f,12f);path.cubicTo(17f,21f,7f,21f,2f,12f);c.drawPath(path,p);c.drawCircle(12f,12f,3f,p) }
             "star" -> { p.style=Paint.Style.FILL;val path=Path();path.moveTo(12f,2f);path.cubicTo(13.4f,8.6f,15.4f,10.6f,22f,12f);path.cubicTo(15.4f,13.4f,13.4f,15.4f,12f,22f);path.cubicTo(10.6f,15.4f,8.6f,13.4f,2f,12f);path.cubicTo(8.6f,10.6f,10.6f,8.6f,12f,2f);c.drawPath(path,p) }
             "island" -> { val path=Path();path.moveTo(3f,15f);path.cubicTo(7f,15f,7f,10f,10f,11f);path.cubicTo(13f,14f,15f,10f,18f,12f);path.lineTo(22f,15f);path.cubicTo(16f,20f,8f,21f,3f,15f);c.drawPath(path,p);c.drawArc(8f,18f,18f,23f,20f,140f,false,p);line(12f,2f,13f,5f,16f,6f,13f,7f,12f,10f,11f,7f,8f,6f,11f,5f,12f,2f) }
             "moments" -> { round(3f,3f,21f,21f,5f);c.drawCircle(15.8f,8f,1.5f,p);line(4f,17f,9f,11f,14f,16f,17f,13f,21f,17f) }

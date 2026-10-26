@@ -76,6 +76,7 @@ class MainActivity : Activity() {
     private var forwardJob:MessageForwarder?=null
     private var forwardDialog:Dialog?=null
     private var batchDeleteCancel:(()->Unit)?=null
+    private var authScreen:AuthScreen?=null
     private var tab = 0
     private var feed: MomentsView? = null
     private var peer: JSONObject? = null
@@ -214,11 +215,11 @@ class MainActivity : Activity() {
         if(Hub.token.isNotEmpty()){refresh();if(peer!=null&&!callScreen)loadVoiceTexts();if(!returningFromPhotoSave&&!returningFromPost)feed?.refresh()};returningFromPhotoSave=false;returningFromPost=false;root.post{if(!isDestroyed){if(voicePaused&&peer!=null&&!callScreen){voicePaused=false;renderMessages(false)};syncHtmlPreviews()}}
     }
     override fun onPause() { resumed=false;finishTextSelection();messageMenu?.dismiss();forwardJob?.cancel();forwardDialog?.dismiss();batchDeleteCancel?.invoke();cancelVoiceText();dictation?.cancel();dictation=null;if(playingId.isNotEmpty()){voicePaused=true;stopPlayer()};pauseChatImages();stopTyping();super.onPause();Hub.foreground=false;Hub.viewingPeer="";if(recording!=null)stopRecording(false) }
-    override fun onDestroy() { screenRequest?.let{ScreenSharing.cancelRequest(it)};screenRequest=null;screenApproval?.let{ScreenSharing.cancelRequest(it.first)};screenApproval=null;cancelVoiceText();releaseChatImages();activeUploads.toList().forEach{it.cancel("页面已关闭，已取消发送")};activeUploads.clear();dismissDialogs();feed?.dispose();stopTyping(); Hub.main.removeCallbacks(tick); if(Hub.listener===hubListener)Hub.listener=null;stopPlayer();releaseRenderers();releaseHtmlPreviews();actionSheet?.dismiss();super.onDestroy() }
+    override fun onDestroy() { authScreen?.dispose();authScreen=null; screenRequest?.let{ScreenSharing.cancelRequest(it)};screenRequest=null;screenApproval?.let{ScreenSharing.cancelRequest(it.first)};screenApproval=null;cancelVoiceText();releaseChatImages();activeUploads.toList().forEach{it.cancel("页面已关闭，已取消发送")};activeUploads.clear();dismissDialogs();feed?.dispose();stopTyping(); Hub.main.removeCallbacks(tick); if(Hub.listener===hubListener)Hub.listener=null;stopPlayer();releaseRenderers();releaseHtmlPreviews();actionSheet?.dismiss();super.onDestroy() }
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
         super.onConfigurationChanged(newConfig)
         dictation?.cancel();dictation=null
-        if(callScreen && Hub.call!=null)showCall() else if(peer!=null){val draft=composer?.text?.toString().orEmpty();showChat();composer?.setText(draft)} else if(Hub.token.isNotEmpty())showHome() else showLogin()
+        if(callScreen && Hub.call!=null)showCall() else if(peer!=null){val draft=composer?.text?.toString().orEmpty();showChat();composer?.setText(draft)} else if(Hub.token.isNotEmpty())showHome() else authScreen?.reflow()?:showLogin()
     }
     override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); handleIntent(intent) }
     private fun handleIntent(intent: Intent?) {
@@ -280,6 +281,7 @@ class MainActivity : Activity() {
         }
     }
     private fun reset(color: Int = canvas) {
+        authScreen?.dispose();authScreen=null
         finishTextSelection();messageTextViews.clear()
         messageMenu?.dismiss();messageMenu=null;messageBubbles.clear();selectionChecks.clear();selectedMessages.clear();selecting=false;selectionHeader=null;selectionFooter=null;composerPanel=null
         forwardJob?.cancel();forwardJob=null;forwardDialog?.dismiss();forwardDialog=null;batchDeleteCancel?.invoke();batchDeleteCancel=null
@@ -397,57 +399,12 @@ class MainActivity : Activity() {
         activeUploads.toList().forEach{it.cancel("账号已退出，已取消发送")}
         chatGeneration++;contacts=JSONArray();conversations=JSONArray();messages.clear();hasMore=false
         callScreen=false; peer=null; Hub.viewingPeer=""; reset()
-        val scroll=ScrollView(this).apply { isFillViewport=true }
         root.background=StarlightDrawable(palette)
-        val form=col(); pad(form,if(compact)14 else 24,if(compact)10 else 24)
-        scroll.addView(form); root.addView(scroll,lp(-1,-1))
-        space(form,if(compact)4 else 20)
-        val mark=FrameLayout(this).apply { background=bg(Color.WHITE,22);clipToOutline=true;contentDescription="弥星标志";addView(ImageView(this@MainActivity).apply{setImageResource(R.drawable.ic_launcher)},FrameLayout.LayoutParams(-1,-1)) }
-        form.addView(mark,lp(if(compact)40 else 64,if(compact)40 else 64)); space(form,if(compact)10 else 24)
-        form.addView(text(if(register)"开启你的弥星" else "弥星",if(compact)24f else 34f,ink,true)); space(form,if(compact)5 else 10)
-        form.addView(text(if(register)"和在意的人，从一句你好开始。" else "让每一次相遇，都有回响。",if(compact)12f else 14f,muted)); space(form,if(compact)14 else 30)
-        val nickname=field("你的昵称")
-        val username=field("账号 · 4–24 位字母或数字").apply { inputType=InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD; filters=arrayOf(android.text.InputFilter.LengthFilter(24)) }
-        val password=field("密码 · 至少 8 位",true)
-        val email=field("验证邮箱").apply { inputType=InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS }
-        val code=field("邮箱验证码 · 6 位").apply { inputType=InputType.TYPE_CLASS_NUMBER;filters=arrayOf(android.text.InputFilter.LengthFilter(6)) }
-        var verificationId="";var verificationEmail=""
-        if(register) form.addView(nickname)
-        form.addView(username); form.addView(password)
-        if(register) {
-            form.addView(email);form.addView(code)
-            lateinit var getCode:TextView
-            getCode=button("获取邮箱验证码",false) {
-                getCode.isEnabled=false
-                val address=email.text.toString().trim()
-                Hub.job({Hub.rawApi("POST","/api/auth/code",JSONObject().put("purpose","register").put("email",address))},{
-                    verificationId=it.getString("verification_id");verificationEmail=address;getCode.text="60 秒后可重发";toast("请检查验证邮箱及垃圾邮件")
-                    Hub.main.postDelayed({getCode.isEnabled=true;getCode.text="获取邮箱验证码"},60000)
-                },{getCode.isEnabled=true;toast(it)})
-            }
-            form.addView(getCode,lp(-1,48));space(form,12)
-        }
-        space(form,8)
-        val error=text("",13f,Color.rgb(184,74,62)).apply { visibility=View.GONE }
-        form.addView(error)
-        lateinit var submit: TextView
-        submit=button(if(register)"创建账号" else "登录弥星") {
-            error.visibility=View.GONE
-            if(username.text.isBlank() || password.text.isBlank() || register && nickname.text.isBlank()) { error.text="请填写完整信息"; error.visibility=View.VISIBLE; return@button }
-            if(register && (verificationId.isEmpty() || email.text.toString().trim()!=verificationEmail || code.text.length!=6)){error.text="请获取并填写此邮箱的验证码";error.visibility=View.VISIBLE;return@button}
-            hideKeyboard(); submit.isEnabled=false; submit.alpha=.6f; submit.text="正在连接…"
-            val p=JSONObject().put("username",username.text.toString()).put("password",password.text.toString()).put("nickname",nickname.text.toString()).put("email",email.text.toString().trim()).put("verification_id",verificationId).put("code",code.text.toString())
-            Hub.job({ Hub.api("POST",if(register)"/api/register" else "/api/login",p) }, {
-                Hub.saveSession(it);if(Hub.me.optBoolean("administrator"))tab=3; showHome(); refresh()
-                if(Hub.me.optBoolean("admin_password_change_required"))startActivity(Intent(this,AdminActivity::class.java))
-                if(Build.VERSION.SDK_INT>=33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED) requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS),50)
-            }, { message -> submit.isEnabled=true; submit.alpha=1f; submit.text=if(register)"创建账号" else "登录弥星"; error.text=message; error.visibility=View.VISIBLE })
-        }
-        form.addView(submit,lp(-1,if(compact)44 else 54)); space(form,if(compact)8 else 22)
-        form.addView(text(if(register)"已有账号？  返回登录" else "还没有账号？  创建一个",14f,accent,true).apply { gravity=Gravity.CENTER; setPadding(0,dp(12),0,dp(12)); setOnClickListener { showLogin(!register) } },lp())
-        if(!register)form.addView(text("忘记密码",14f,accent).apply { gravity=Gravity.CENTER;setPadding(0,dp(12),0,dp(12));setOnClickListener { startActivity(Intent(this@MainActivity,AccountActivity::class.java).putExtra("mode","reset")) } },lp())
-        space(form,32)
-        form.addView(text("和在意的人，自在相伴。",12f,muted).apply { gravity=Gravity.CENTER; setLineSpacing(dp(6).toFloat(),1f) },lp())
+        authScreen=AuthScreen(this,palette) { result ->
+            Hub.saveSession(result);if(Hub.me.optBoolean("administrator"))tab=3;showHome();refresh()
+            if(Hub.me.optBoolean("admin_password_change_required"))startActivity(Intent(this,AdminActivity::class.java))
+            if(Build.VERSION.SDK_INT>=33&&checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED)requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS),50)
+        }.also{root.addView(it.view,lp(-1,-1))}
     }
 
     private fun homeConnection() = if(Hub.me.optBoolean("admin_password_change_required"))"请先修改管理员初始密码" else if(Hub.connected) "●  已连接" else "○  连接中…"
@@ -1797,6 +1754,7 @@ class MainActivity : Activity() {
     }
     @Deprecated("Android back callback")
     override fun onBackPressed() {
+        if(authScreen?.back()==true)return
         if(messageMenu?.isShowing==true){finishTextSelection();messageMenu?.dismiss();return}
         if(selecting){endMessageSelection();return}
         if(callScreen && Hub.call!=null) { toast("请使用挂断按钮结束通话"); return }

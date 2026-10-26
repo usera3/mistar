@@ -8,3 +8,10 @@ condition = "AND"
 paths = ['''(^|/)android/app/src/androidTest/assets/dictation/python-fixtures\.json$''']
 regexTarget = "line"
 regexes = ['''"key": "G7E1C8B0D7D7E4L3J2U9D6W0B2M8Q6O5"''']
+
+[[allowlists]]
+description = "Exact synthetic password used only by the fully intercepted native form test"
+condition = "AND"
+paths = ['''(^|/)android/app/src/androidTest/java/cn/qingliao/app/AuthDeveloperTests\.kt$''']
+regexTarget = "secret"
+regexes = ['''^synthetic-pass-123$''']
