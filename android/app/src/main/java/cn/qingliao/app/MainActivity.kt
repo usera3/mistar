@@ -13,6 +13,7 @@ import android.graphics.drawable.RippleDrawable
 import android.content.res.ColorStateList
 import android.media.MediaPlayer
 import android.media.MediaRecorder
+import android.media.MediaMetadataRetriever
 import android.media.projection.MediaProjectionManager
 import android.net.Uri
 import android.os.*
@@ -73,6 +74,11 @@ class MainActivity : Activity() {
     private var selectionForward:View?=null
     private var selectionDelete:View?=null
     private var composerPanel:View?=null
+    private var inputPanel:ChatInputPanel?=null
+    private var inputRowView:View?=null
+    private var recorderButton:View?=null
+    private var voicePlayback:VoicePlayback?=null
+    private val voiceViews=mutableMapOf<String,VoiceMessageView>()
     private var forwardJob:MessageForwarder?=null
     private var forwardDialog:Dialog?=null
     private var batchDeleteCancel:(()->Unit)?=null
@@ -123,14 +129,30 @@ class MainActivity : Activity() {
     private var recording: MediaRecorder? = null
     private var recordFile: File? = null
     private var recordStart = 0L
+    private var recordOwner=""
+    private var recordSession=""
+    private var recordPeer=""
+    private var recordQuote:JSONObject?=null
+    private var recordQuoteRef:JSONObject?=null
+    private data class ReadyVoice(val id:String,val file:File,val owner:String,val session:String,val peer:String,val duration:Int,val quote:JSONObject?,val quoteRef:JSONObject?)
+    private var readyVoice:ReadyVoice?=null
+    private var voiceDraftRow:LinearLayout?=null
+    private var voiceDraftCaption:TextView?=null
+    private var voiceDraftPlay:FrameLayout?=null
+    private var voiceDraftIcon=""
+    private var voiceDraftError=""
     private var recordLabel: TextView? = null
     private var recordBar: LinearLayout? = null
     private var player: MediaPlayer? = null
     private var playingId = ""
     private var permissionAction: (() -> Unit)? = null
     private var permissionSession=""
+    private data class GrantedAction(val session:String,val expires:Long,val action:()->Unit)
+    private var grantedAction:GrantedAction?=null
     private var pickerPeer = ""
     private var pickerKind = "file"
+    private var pickerQuote:JSONObject?=null
+    private var pickerQuoteRef:JSONObject?=null
     private var saveFile: File? = null
     private var savingMoment=false
     private var returningFromPhotoSave=false
@@ -193,7 +215,7 @@ class MainActivity : Activity() {
             if (recording != null) {
                 val elapsed = (SystemClock.elapsedRealtime() - recordStart) / 1000
                 recordLabel?.let { label -> val value="正在录音  ${duration(elapsed)}  /  01:00"; if(label.text.toString()!=value)label.text=value }
-                if (elapsed >= 60) stopRecording(true)
+                if (elapsed >= 60) stopRecording(false,true)
             }
             Hub.main.postDelayed(this, 500)
         }
@@ -213,6 +235,7 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume();resumed=true; val next=ThemeStore.current(this); val changed=next.primary!=palette.primary; palette=next
         Hub.foreground=true; Hub.viewingPeer=peer?.optString("id") ?: ""
+        grantedAction?.let{pending->grantedAction=null;if(Hub.token==pending.session&&SystemClock.elapsedRealtime()<=pending.expires)pending.action()else if(Hub.token==pending.session)toast("权限已开启，请重新点击对应功能")}
         AppUpdates.check();AppUpdates.notifyAvailable()
         finishScreenApproval()
         if(Hub.call!=null) { showCall() }
@@ -223,8 +246,8 @@ class MainActivity : Activity() {
         }
         if(Hub.token.isNotEmpty()){refresh();if(peer!=null&&!callScreen)loadVoiceTexts();if(!returningFromPhotoSave&&!returningFromPost)feed?.refresh()};returningFromPhotoSave=false;returningFromPost=false;root.post{if(!isDestroyed){if(voicePaused&&peer!=null&&!callScreen){voicePaused=false;renderMessages(false)};syncHtmlPreviews()}}
     }
-    override fun onPause() { stashDraft(true);conversationMenu?.dismiss(); resumed=false;finishTextSelection();messageMenu?.dismiss();forwardJob?.cancel();forwardDialog?.dismiss();batchDeleteCancel?.invoke();cancelVoiceText();dictation?.cancel();dictation=null;if(playingId.isNotEmpty()){voicePaused=true;stopPlayer()};pauseChatImages();stopTyping();super.onPause();Hub.foreground=false;Hub.viewingPeer="";if(recording!=null)stopRecording(false) }
-    override fun onDestroy() { stashDraft(true);conversationMenu?.dismiss(); authScreen?.dispose();authScreen=null; screenRequest?.let{ScreenSharing.cancelRequest(it)};screenRequest=null;screenApproval?.let{ScreenSharing.cancelRequest(it.first)};screenApproval=null;cancelVoiceText();releaseChatImages();activeUploads.toList().forEach{it.cancel("页面已关闭，已取消发送")};activeUploads.clear();dismissDialogs();feed?.dispose();stopTyping(); Hub.main.removeCallbacks(tick); if(Hub.listener===hubListener)Hub.listener=null;stopPlayer();releaseRenderers();releaseHtmlPreviews();actionSheet?.dismiss();super.onDestroy() }
+    override fun onPause() { inputPanel?.hide();stashDraft(true);conversationMenu?.dismiss(); resumed=false;finishTextSelection();messageMenu?.dismiss();forwardJob?.cancel();forwardDialog?.dismiss();batchDeleteCancel?.invoke();cancelVoiceText();dictation?.cancel();dictation=null;if(playingId.isNotEmpty()){voicePaused=true;stopPlayer()};pauseChatImages();stopTyping();super.onPause();Hub.foreground=false;Hub.viewingPeer="";if(recording!=null)stopRecording(false,true) }
+    override fun onDestroy() { grantedAction=null;if(recording!=null)stopRecording(false);clearReadyVoice();inputPanel?.hide();voicePlayback?.dispose();voicePlayback=null;stashDraft(true);conversationMenu?.dismiss(); authScreen?.dispose();authScreen=null; screenRequest?.let{ScreenSharing.cancelRequest(it)};screenRequest=null;screenApproval?.let{ScreenSharing.cancelRequest(it.first)};screenApproval=null;cancelVoiceText();releaseChatImages();activeUploads.toList().forEach{it.cancel("页面已关闭，已取消发送")};activeUploads.clear();dismissDialogs();feed?.dispose();stopTyping(); Hub.main.removeCallbacks(tick); if(Hub.listener===hubListener)Hub.listener=null;stopPlayer();releaseRenderers();releaseHtmlPreviews();actionSheet?.dismiss();super.onDestroy() }
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
         super.onConfigurationChanged(newConfig)
         dictation?.cancel();dictation=null
@@ -290,7 +313,7 @@ class MainActivity : Activity() {
         }
     }
     private fun reset(color: Int = canvas) {
-        stashDraft();composerPeer="";conversationMenu?.dismiss();conversationMenu=null
+        stashDraft();composerPeer="";inputPanel?.hide();inputPanel=null;inputRowView=null;recorderButton=null;voiceDraftRow=null;voiceDraftPlay=null;voiceDraftCaption=null;voiceDraftIcon="";voiceViews.clear();conversationMenu?.dismiss();conversationMenu=null
         authScreen?.dispose();authScreen=null
         finishTextSelection();messageTextViews.clear()
         messageMenu?.dismiss();messageMenu=null;messageBubbles.clear();selectionChecks.clear();selectedMessages.clear();selecting=false;selectionHeader=null;selectionFooter=null;composerPanel=null
@@ -404,6 +427,8 @@ class MainActivity : Activity() {
     }
 
     private fun showLogin(register: Boolean = false) {
+        grantedAction=null
+        clearReadyVoice();voicePlayback?.dispose();voicePlayback=null;player=null;playingId=""
         stashDraft(true);composerPeer="";savingText.clear()
         cancelVoiceText();voiceTextResults=JSONObject();hiddenVoiceTexts.clear();voiceTextStates.clear();voiceTextPanels.clear()
         if(recording!=null)stopRecording(false);stopPlayer();replyTarget=null;searchWindow=false;saveFile=null;pickerSession="";avatarPickerSession="";saveSession="";permissionAction=null;permissionSession=""
@@ -420,6 +445,7 @@ class MainActivity : Activity() {
 
     private fun homeConnection() = if(Hub.me.optBoolean("admin_password_change_required"))"请先修改管理员初始密码" else if(Hub.connected) "●  已连接" else "○  连接中…"
     private fun showHome(tabChange:Boolean=false) {
+        clearReadyVoice()
         stashDraft(true);composerPeer=""
         cancelVoiceText();voiceTextResults=JSONObject();hiddenVoiceTexts.clear();voiceTextStates.clear();voiceTextPanels.clear()
         peer=null; Hub.viewingPeer=""; callScreen=false; reset(canvas)
@@ -774,7 +800,15 @@ class MainActivity : Activity() {
         }
     }
     private fun addSelectableMessage(parent:LinearLayout,holder:View,m:JSONObject):View{
-        if(!selecting||m.optBoolean("pending")){parent.addView(holder,lp());return holder}
+        if(!selecting||m.optBoolean("pending")){
+            val generation=chatGeneration;val session=Hub.token;val remote=peer?.optString("id");val id=m.optString("id")
+            val eligible=m.optString("type") in setOf("text","html","image","voice","file")&&!m.optBoolean("pending")&&!m.optBoolean("withdrawn")&&!m.optBoolean("decrypt_failed")
+            if(!eligible){parent.addView(holder,lp());return holder}
+            val frame=ReplySwipeFrame(this,holder,{
+                Hub.token==session&&peer?.optString("id")==remote&&generation==chatGeneration&&!isDestroyed&&!isFinishing&&!selecting&&textActionMode==null&&recording==null&&readyVoice==null&&!callScreen&&canContact()&&messages.any{it.optString("id")==id&&!it.optBoolean("withdrawn")&&!it.optBoolean("decrypt_failed")}
+            }){selectReply(m);inputPanel?.hide();composer?.post{if(Hub.token==session&&peer?.optString("id")==remote&&!isDestroyed)(getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager).showSoftInput(composer,InputMethodManager.SHOW_IMPLICIT)}}.apply{tag=id}
+            parent.addView(frame,lp());return frame
+        }
         val frame=object:FrameLayout(this){override fun onInterceptTouchEvent(event:android.view.MotionEvent)=true}.apply{tag=m.optString("id");isClickable=true;setOnClickListener{toggleMessageSelection(m)}};holder.tag=null;holder.importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
         frame.addView(holder,FrameLayout.LayoutParams(-1,-2).apply{marginStart=dp(if(compact)26 else 36)})
         val check=CheckBox(this).apply{
@@ -786,7 +820,7 @@ class MainActivity : Activity() {
     private fun selectedSnapshots()=messages.filter{it.optString("id") in selectedMessages}.map{JSONObject(it.toString())}
     private fun beginMessageSelection(m:JSONObject){
         if(m.optBoolean("pending"))return
-        finishTextSelection()
+        inputPanel?.hide();finishTextSelection()
         messageMenu?.dismiss();hideKeyboard();stopTyping();stopPlayer();selecting=true;selectedMessages.clear();selectedMessages.add(m.optString("id"))
         chatHeader?.visibility=View.GONE;composerPanel?.visibility=View.GONE
         selectionHeader=row().apply{setPadding(dp(4),dp(4),dp(8),dp(4));setBackgroundColor(palette.surface)
@@ -899,6 +933,7 @@ class MainActivity : Activity() {
             }.showThemed()
     }
     private fun bindMessageActions(view: View,m: JSONObject,root: Boolean=true) {
+        if(view is SeekBar)return
         if(root || view.isClickable)view.setOnLongClickListener { messageActions(m); true }
         if(view is ViewGroup)for(i in 0 until view.childCount) { val child=view.getChildAt(i); if(child !is WebView&&child !is MessageTextView)bindMessageActions(child,m,false) }
     }
@@ -938,7 +973,7 @@ class MainActivity : Activity() {
     private fun transcribeVoice(m:JSONObject){
         if(!voiceCanTranscribe(m)||Hub.token.isEmpty())return
         if(Hub.call!=null){toast("通话中暂不能转文字");return}
-        if(recording!=null){toast("请先结束语音消息录音");return}
+        if(recording!=null||readyVoice!=null){toast("请先发送或丢弃本次录音");return}
         val f=m.optJSONObject("file")?:return
         if(f.optLong("size") !in 1..VoiceTextAudio.MAX_BYTES){setVoiceTextState(m.optString("id"),false,"转文字支持5MB以内、最长60秒的语音");return}
         val owner=Hub.me.optString("id");val target=peer?.optString("id")?:return;val session=Hub.token;val generation=chatGeneration;val id=m.getString("id");val stamp=LocalData.epoch(owner)
@@ -979,6 +1014,7 @@ class MainActivity : Activity() {
     }
 
     private fun openChat(u: JSONObject) {
+        if(readyVoice?.peer!=u.optString("id"))clearReadyVoice()
         stashDraft(true);composerPeer=""
         chatGeneration++
         if(recording!=null)stopRecording(false)
@@ -1015,19 +1051,29 @@ class MainActivity : Activity() {
         latestMessage=button("回到最新消息") { latestMessage?.visibility=View.GONE;if(searchWindow){searchWindow=false;messages.clear();cachedMessages(false);loadMessages(false);loadPending()}else scrollLatest(true) }.apply { visibility=View.GONE;contentDescription="回到最新消息";elevation=dp(3).toFloat() }
         chatFrame.addView(latestMessage,FrameLayout.LayoutParams(-2,dp(42),Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { bottomMargin=dp(12) })
         divider(root)
-        val compose=col().apply { background=BrandUi.card(this@MainActivity,palette,24);setPadding(dp(if(compact)4 else 8),dp(if(compact)5 else 12),dp(if(compact)4 else 12),dp(2)) }
-        recordBar=row().apply { background=bg(Color.rgb(255,242,234),12); pad(this,8); visibility=View.GONE }
-        recordLabel=text("正在录音  00:00",12f,Color.rgb(167,83,50)); recordBar!!.addView(recordLabel,LinearLayout.LayoutParams(0,-2,1f))
-        recordBar!!.addView(icon("close","取消录音") { stopRecording(false) }); if(compact)recordBar!!.addView(icon("send","发送语音"){stopRecording(true)}) else recordBar!!.addView(button("发送语音") { stopRecording(true) }); compose.addView(recordBar)
+        val compose=col().apply { background=BrandUi.card(this@MainActivity,palette,20);setPadding(dp(if(compact)4 else 8),dp(if(compact)3 else 6),dp(if(compact)4 else 8),dp(3)) }
+        recordBar=row().apply{background=bg(soft,14);setPadding(dp(8),dp(2),dp(2),dp(2));visibility=View.GONE;tag="composer.recording"}
+        recordLabel=text("正在录音  00:00",if(compact)11f else 13f,accent);recordBar!!.addView(recordLabel,LinearLayout.LayoutParams(0,-2,1f))
+        recordBar!!.addView(icon("close","取消录音"){stopRecording(false)},lp(36,44))
+        recordBar!!.addView(icon("stop","结束录音并预览",accent){stopRecording(false,true)}.apply{tag="composer.record.preview"},lp(36,44))
+        recordBar!!.addView(icon("send","发送语音",accent){stopRecording(true)}.apply{tag="composer.record.send"},lp(40,44));compose.addView(recordBar,lp())
+        voiceDraftRow=row().apply{background=bg(soft,14);setPadding(dp(4),dp(2),dp(2),dp(2));visibility=View.GONE;tag="composer.voiceDraft"}
+        voiceDraftPlay=icon("play","试听录音",accent){previewReadyVoice()}.apply{tag="composer.voiceDraft.play"};voiceDraftRow!!.addView(voiceDraftPlay,lp(40,44))
+        voiceDraftCaption=text("录音待发送",if(compact)11f else 13f,ink).apply{maxLines=2;ellipsize=android.text.TextUtils.TruncateAt.END}
+        voiceDraftRow!!.addView(voiceDraftCaption,LinearLayout.LayoutParams(0,-2,1f))
+        voiceDraftRow!!.addView(icon("trash","丢弃录音"){clearReadyVoice()}.apply{tag="composer.voiceDraft.discard"},lp(36,44))
+        voiceDraftRow!!.addView(icon("send","发送这段录音",accent){sendReadyVoice()}.apply{tag="composer.voiceDraft.send"},lp(40,44));compose.addView(voiceDraftRow,lp())
         replyBar=row().apply{background=bg(canvas,12);setPadding(dp(10),dp(3),0,dp(3));visibility=if(replyTarget==null)View.GONE else View.VISIBLE}
         replyLabel=text(replyTarget?.optString("excerpt")?:"",12f,muted).apply{maxLines=2;ellipsize=android.text.TextUtils.TruncateAt.END}
         replyBar!!.addView(replyLabel,LinearLayout.LayoutParams(0,-2,1f));replyBar!!.addView(icon("close","取消引用"){replyTarget=null;replyBar?.visibility=View.GONE;stashDraft()});compose.addView(replyBar)
-        val inputRow=row(); inputRow.gravity=Gravity.BOTTOM
-        if(compact)inputRow.addView(icon("add","更多发送方式",muted){sendMenu()}) else inputRow.addView(icon("smile","表情",muted) { emojis() }.apply { layoutParams=lp(44,48) })
+        val inputRow=row();inputRow.gravity=Gravity.BOTTOM;inputRowView=inputRow
+        if(compact)inputRow.addView(icon("add","更多发送方式",accent){sendMenu()}.apply{tag="composer.more"},lp(36,44))
+        else{recorderButton=icon("mic","录制语音消息",accent){startRecordingScoped()}.apply{tag="composer.record"};inputRow.addView(recorderButton,lp(40,48))}
         composer=EditText(this).apply {
             hint=if(compact)"消息" else "发消息…"; textSize=if(compact)14f else 16f; setTextColor(ink); setHintTextColor(muted); background=bg(canvas,15); setPadding(dp(if(compact)8 else 14),dp(if(compact)8 else 12),dp(if(compact)8 else 14),dp(if(compact)8 else 12)); minHeight=dp(if(compact)40 else 48);minimumWidth=0;minWidth=0
             inputType=InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
             maxLines=if(compact)2 else 4
+            setOnTouchListener{_,e->if(e.actionMasked==android.view.MotionEvent.ACTION_DOWN)inputPanel?.hide();false}
             filters=arrayOf(android.text.InputFilter.LengthFilter(5000));isSaveEnabled=false;tag="chat.composer"
             tintInput(this)
             addTextChangedListener(object : TextWatcher {
@@ -1038,17 +1084,27 @@ class MainActivity : Activity() {
         }
         inputRow.addView(composer,LinearLayout.LayoutParams(0,-2,1f))
         sendButton=icon("send","发送消息",palette.onPrimary) { sendText() }.apply { touch(this,palette.primary,15); isEnabled=false; alpha=.4f }
-        if(compact)inputRow.addView(icon("mic","语音转文字",accent){startDictation()})
-        inputRow.addView(sendButton,lp(if(compact)40 else 48,if(compact)40 else 48).apply { marginStart=dp(if(compact)2 else 8) }); compose.addView(inputRow)
-        val tools=row().apply { setPadding(dp(2),dp(3),0,0) }
-        fun tool(kind: String,label: String,action: ()->Unit) {
-            val tint=accent
-            val r=row().apply { gravity=Gravity.CENTER; contentDescription=label; touch(this,canvas,12); setOnClickListener { action() } }
-            r.addView(Glyph(this,kind,tint),lp(17,17)); r.addView(text(label,11f,muted).apply { setPadding(dp(6),0,0,0) }); tools.addView(r,LinearLayout.LayoutParams(0,dp(48),1f).apply { marginStart=dp(3); marginEnd=dp(3); topMargin=dp(5); bottomMargin=dp(6) })
+        if(compact)inputRow.addView(icon("mic","语音转文字",accent){startDictation()}.apply{tag="composer.dictate"},lp(36,44))
+        else{
+            inputRow.addView(icon("smile","表情面板",accent){emojis()}.apply{tag="composer.emoji"},lp(36,48))
+            inputRow.addView(icon("add","更多发送方式",accent){sendMenu()}.apply{tag="composer.more"},lp(36,48))
         }
-        tool("image","图片") { pickFile("image") }; tool("mic","语音") { if(recording!=null)stopRecording(true) else permission(arrayOf(Manifest.permission.RECORD_AUDIO)) { startRecording() } }; tool("file","文件") { pickFile("file") }
-        tool("code","HTML") { htmlEditor() }; tool("mic","转文字"){startDictation()};if(!compact)compose.addView(tools); root.addView(compose);composerPanel=compose;composerOwner=Hub.me.optString("id");composerSession=Hub.token;composerPeer=u.getString("id");restoreDraft();renderMessages();loadVoiceTexts()
+        inputRow.addView(sendButton,lp(if(compact)40 else 48,if(compact)40 else 48).apply { marginStart=dp(if(compact)2 else 8) }); compose.addView(inputRow)
+        val editor=composer!!;val session=Hub.token;val owner=Hub.me.optString("id");val target=u.getString("id")
+        inputPanel=ChatInputPanel(this,palette,editor,{
+            Hub.token==session&&Hub.me.optString("id")==owner&&peer?.optString("id")==target&&composer===editor&&!callScreen&&!isDestroyed&&!isFinishing
+        },listOf(
+            ChatInputPanel.Action("image","图片"){pickFile("image")},
+            ChatInputPanel.Action("file","文件"){pickFile("file")},
+            ChatInputPanel.Action("mic","录制语音",{Hub.call==null&&recording==null}){startRecordingScoped()},
+            ChatInputPanel.Action("dictate","语音输入",{Hub.call==null&&recording==null}){startDictation()},
+            ChatInputPanel.Action("code","HTML 卡片"){htmlEditor()},
+            ChatInputPanel.Action("video","音视频通话",{recording==null}){chatMenu()}
+        )){root.post{if(!isDestroyed)updateCompactChat()}}
+        compose.addView(inputPanel,lp());root.addView(compose);composerPanel=compose;composerOwner=owner;composerSession=session;composerPeer=target;restoreDraft();renderMessages();loadVoiceTexts()
+        renderRecordingUi()
     }
+
     private fun updateCompactChat(){
         val header=chatHeader?:return
         val available=root.height-root.paddingTop-root.paddingBottom
@@ -1062,15 +1118,19 @@ class MainActivity : Activity() {
             ActionSheets.Action("more","聊天设置"){people()}
         ))
     }
-    private fun sendMenu(){
-        showActions("发送方式",actions=listOf(
-            ActionSheets.Action("mic","语音转文字"){startDictation()},
-            ActionSheets.Action("mic","发送语音"){if(recording!=null)stopRecording(true) else permission(arrayOf(Manifest.permission.RECORD_AUDIO)){startRecording()}},
-            ActionSheets.Action("image","发送图片"){pickFile("image")},
-            ActionSheets.Action("file","发送文件"){pickFile("file")},
-            ActionSheets.Action("code","发送HTML"){htmlEditor()},
-            ActionSheets.Action("smile","表情"){emojis()}
-        ))
+    private fun toggleInputPanel(mode:String){
+        if(!contactGuard())return
+        if(recording!=null){toast("请先发送或取消本次录音");return}
+        hideKeyboard();stopTyping();actionSheet?.dismiss();inputPanel?.toggle(mode)
+    }
+    private fun sendMenu(){toggleInputPanel("more")}
+    private fun startRecordingScoped(){
+        if(!contactGuard()||Hub.call!=null){if(Hub.call!=null)toast("通话中暂不能录制语音");return}
+        val session=Hub.token;val owner=Hub.me.optString("id");val target=peer?.optString("id");val editor=composer
+        inputPanel?.hide()
+        permission(arrayOf(Manifest.permission.RECORD_AUDIO)){
+            if(Hub.token==session&&Hub.me.optString("id")==owner&&peer?.optString("id")==target&&composer===editor&&!callScreen&&Hub.call==null&&resumed&&Hub.foreground&&!isDestroyed)startRecording()
+        }
     }
     private fun dictationPrivacy(){
         val prefs=getSharedPreferences("dictation",MODE_PRIVATE)
@@ -1151,7 +1211,7 @@ class MainActivity : Activity() {
         val parent=messageList ?: return
         val viewport=messageScroll ?: return
         val oldHeight=parent.height;val oldY=viewport.scrollY
-        releaseChatImages();releaseHtmlPreviews();receiptLabels.clear();voiceTextPanels.clear();parent.removeAllViews()
+        releaseChatImages();releaseHtmlPreviews();receiptLabels.clear();voiceTextPanels.clear();voiceViews.clear();parent.removeAllViews()
         if(hasMore)parent.addView(text("查看更早的消息",12f,accent).apply { gravity=Gravity.CENTER;setPadding(0,dp(18),0,dp(18));setOnClickListener { loadMessages(true) } },lp())
         if(messages.isEmpty()){parent.addView(text("从一句问候开始吧",13f,muted).apply { gravity=Gravity.CENTER;setPadding(0,dp(40),0,dp(40)) },lp());return}
         messages.forEachIndexed { index,m -> addMessageRow(parent,m,if(index==0)0L else messages[index-1].optLong("created")) }
@@ -1228,10 +1288,10 @@ class MainActivity : Activity() {
                 detail.addView(text((if(ext.isEmpty())"文件" else ext)+" · "+size(f?.optLong("size")?:0),11f,bubbleMuted)); r.addView(detail); bubble.addView(r); bubble.contentDescription="打开文件"; bubble.setOnClickListener { f?.let { openAttachment(it) } }
             }
             "voice" -> {
-                val r=row(); val control=FrameLayout(this).apply { background=bg(if(mine)palette.primaryInset else soft,16); addView(Glyph(this@MainActivity,if(playingId==m.optString("id"))"pause" else "play",if(mine)palette.onPrimary else accent),FrameLayout.LayoutParams(dp(17),dp(17),Gravity.CENTER)) }
-                r.addView(control,lp(32,32))
-                val bars=minOf(80,((maxWidth-dp(100))/resources.displayMetrics.density).toInt()).coerceAtLeast(38)
-                r.addView(VoiceBars(this,bubbleInk),lp(bars,26).apply { marginStart=dp(10); marginEnd=dp(12) });r.addView(text(m.optString("text","语音"),13f,bubbleMuted).apply{this.maxWidth=(maxWidth-dp(32+bars+22)).coerceAtLeast(dp(32));maxLines=2;ellipsize=android.text.TextUtils.TruncateAt.END});bubble.addView(r);bubble.contentDescription="播放语音";bubble.setOnClickListener{playVoice(m)}
+                val f=m.optJSONObject("file");val key=voiceKey(m)
+                val widget=VoiceMessageView(this,palette,key,m.optString("text","语音"),bubbleInk,bubbleMuted,maxWidth,{playVoice(m)},{value->if(voicePlayback?.activeKey==key)voicePlayback?.seek(value)},{if(voicePlayback?.activeKey==key)voicePlayback?.cycleSpeed()})
+                voiceViews[key]=widget;widget.render(voicePlayback?.state(key)?:VoicePlayback.State(key));bubble.addView(widget)
+                bubble.contentDescription="播放语音";bubble.setOnClickListener{if(f!=null)playVoice(m)}
             }
         }
         messageBubbles[m.optString("id")]=bubble;bindMessageActions(bubble,m)
@@ -1277,6 +1337,9 @@ class MainActivity : Activity() {
     private fun htmlEditor() {
         if(!contactGuard())return
         val recipient=peer?.optString("id") ?: return
+        val session=Hub.token;val owner=Hub.me.optString("id");val reference=replyTarget;val quote=replyTarget?.let{JSONObject(it.toString())}
+        fun valid()=Hub.token==session&&Hub.me.optString("id")==owner&&peer?.optString("id")==recipient&&!isDestroyed&&!isFinishing
+        var pendingSource="";var client=""
         stopTyping(); hideKeyboard()
         val input=EditText(this).apply {
             hint="<div style=\"padding:16px;color:${ThemeStore.hex(accent)}\">你好，HTML！</div>"
@@ -1291,11 +1354,14 @@ class MainActivity : Activity() {
                 if(input.text.isBlank())input.error="请粘贴 HTML 代码" else showHtml(input.text.toString())
             }
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                if(!valid())return@setOnClickListener
                 val source=input.text.toString().trim()
                 if(source.isEmpty()) { input.error="请粘贴 HTML 代码"; return@setOnClickListener }
+                if(pendingSource!=source){pendingSource=source;client=UUID.randomUUID().toString()}
                 val send=dialog.getButton(AlertDialog.BUTTON_POSITIVE); send.isEnabled=false
-                Hub.job({ Hub.api("POST","/api/messages",JSONObject().put("recipient",recipient).put("type","html").put("text",source).put("client_id",UUID.randomUUID().toString())) }, {
-                    dialog.dismiss(); hideKeyboard(); if(peer?.optString("id")==recipient)appendMessage(it) else toast("HTML 消息已发送")
+                Hub.job({ check(valid());Hub.api("POST","/api/messages",JSONObject().put("recipient",recipient).put("type","html").put("text",source).put("client_id",client).apply{quote?.let{put("quote",it)}}) }, {
+                    if(!valid())return@job
+                    consumeReply(reference,recipient,session);dialog.dismiss(); hideKeyboard(); if(peer?.optString("id")==recipient)appendMessage(it) else toast("HTML 消息已发送")
                 }, { send.isEnabled=true; toast("发送失败：$it") })
             }
         }
@@ -1340,11 +1406,15 @@ class MainActivity : Activity() {
             toast("待发消息未保存，已保留草稿：$reason")
         },clearDraft=true)
     }
+    private fun consumeReply(reference:JSONObject?,target:String,session:String){
+        if(reference!=null&&replyTarget===reference&&peer?.optString("id")==target&&Hub.token==session){replyTarget=null;replyBar?.visibility=View.GONE;stashDraft()}
+    }
     private fun quoteExcerpt(m:JSONObject):String {
         val value=when(m.optString("type")){"image"->"[图片]";"voice"->"[语音]";"file"->"[文件]";"html"->"[HTML 消息]";else->m.optString("text")}
         val cut=value.take(160);return if(cut.lastOrNull()?.isHighSurrogate()==true)cut.dropLast(1)else cut
     }
     private fun selectReply(m:JSONObject) {
+        if(recording!=null||readyVoice!=null){toast("请先发送或丢弃本次录音");return}
         replyTarget=JSONObject().put("id",m.getString("id")).put("sender",m.getString("sender")).put("type",m.getString("type")).put("excerpt",quoteExcerpt(m))
         replyLabel?.text="引用："+quoteExcerpt(m);replyBar?.visibility=View.VISIBLE;composer?.requestFocus();stashDraft()
     }
@@ -1388,29 +1458,18 @@ class MainActivity : Activity() {
         if(incremental){val view=addMessageRow(messageList!!,m,previous!!.optLong("created"));if(follow)Motion.reveal(view,y=8f,duration=190)}else renderMessages(false)
         if(follow){latestMessage?.visibility=View.GONE;scrollLatest(true)}else latestMessage?.let { if(it.visibility!=View.VISIBLE){it.visibility=View.VISIBLE;Motion.reveal(it,y=5f,duration=180)} }
     }
-    private fun emojis() {
-        hideKeyboard(); stopTyping(); actionSheet?.dismiss()
-        val values=listOf("😊","🥰","😂","🥺","😎","🤔","😴","😭","👍","❤️","🌷","☀️","🌙","🍀","✨","🎉")
-        val grid=col(); lateinit var dialog: Dialog
-        values.chunked(4).forEach { group ->
-            val r=row()
-            group.forEach { emoji -> r.addView(text(emoji,28f).apply { gravity=Gravity.CENTER; contentDescription="插入表情 "+emoji; touch(this,canvas,14); setOnClickListener { composer?.append(emoji); dialog.dismiss() } },LinearLayout.LayoutParams(0,dp(54),1f).apply { setMargins(dp(4),dp(4),dp(4),dp(4)) }) }
-            grid.addView(r,lp())
-        }
-        dialog=ActionSheets.content(this,"表情","点选表情，加入正在编辑的消息",grid); actionSheet=dialog
-        dialog.setOnDismissListener { if(actionSheet===dialog)actionSheet=null }
-    }
+    private fun emojis(){toggleInputPanel("emoji")}
     private fun permission(permissions: Array<String>, action: () -> Unit) {
         val missing=permissions.filter { checkSelfPermission(it)!=PackageManager.PERMISSION_GRANTED }
-        if(missing.isEmpty())action() else { permissionAction=action;permissionSession=Hub.token;requestPermissions(missing.toTypedArray(),51) }
+        if(missing.isEmpty())action() else { grantedAction=null;permissionAction=action;permissionSession=Hub.token;requestPermissions(missing.toTypedArray(),51) }
     }
     override fun onRequestPermissionsResult(code: Int, permissions: Array<out String>, grants: IntArray) {
         super.onRequestPermissionsResult(code,permissions,grants)
-        if(code==51) {val action=permissionAction;permissionAction=null;val valid=permissionSession.isNotEmpty()&&permissionSession==Hub.token;permissionSession="";if(!valid)return;if(grants.isNotEmpty()&&grants.all{it==PackageManager.PERMISSION_GRANTED})action?.invoke()else toast("需要相应权限才能使用录音或通话功能，可在系统设置中开启")}
+        if(code==51) {val action=permissionAction;permissionAction=null;val valid=permissionSession.isNotEmpty()&&permissionSession==Hub.token;permissionSession="";if(!valid)return;if(grants.isNotEmpty()&&grants.all{it==PackageManager.PERMISSION_GRANTED}){if(resumed&&Hub.foreground)action?.invoke()else if(action!=null)grantedAction=GrantedAction(Hub.token,SystemClock.elapsedRealtime()+1000,action)}else toast("需要相应权限才能使用录音或通话功能，可在系统设置中开启")}
     }
     private fun pickFile(kind: String) {
         if(!contactGuard())return
-        pickerPeer=peer?.optString("id") ?: return;pickerKind=kind;pickerSession=Hub.token
+        pickerPeer=peer?.optString("id") ?: return;pickerKind=kind;pickerSession=Hub.token;pickerQuoteRef=replyTarget;pickerQuote=replyTarget?.let{JSONObject(it.toString())}
         startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).setType(if(kind=="image")"image/*" else "*/*").addCategory(Intent.CATEGORY_OPENABLE),61)
     }
     @Deprecated("Android result API")
@@ -1440,22 +1499,23 @@ class MainActivity : Activity() {
         } else if(code==64) {
             uploadAvatar(uri)
         } else if(code==61) {
+            val quote=pickerQuote;val reference=pickerQuoteRef;val session=pickerSession;val target=pickerPeer;pickerQuote=null;pickerQuoteRef=null
             var name="文件"; var bytes=-1L
             contentResolver.query(uri,arrayOf(OpenableColumns.DISPLAY_NAME,OpenableColumns.SIZE),null,null,null)?.use { c -> if(c.moveToFirst()) { name=c.getString(0)?:name; if(!c.isNull(1))bytes=c.getLong(1) } }
             if(bytes>25*1024*1024) { toast("单个文件不能超过 25 MB"); return }
             val mime=contentResolver.getType(uri)?:"application/octet-stream"
-            uploadFile(uri,name,mime,pickerKind,pickerPeer,"")
+            uploadFile(uri,name,mime,pickerKind,target,"",quote=quote,onResult={message,_->if(message!=null)consumeReply(reference,target,session)})
         } else if(code==62) {
             val file=saveFile ?: return; saveFile=null
             Hub.io.execute { try { contentResolver.openOutputStream(uri)?.use { output -> file.inputStream().use { it.copyTo(output) } } ?: throw Exception("无法写入文件"); Hub.main.post { toast("文件已保存") } } catch(e:Exception) { Hub.main.post { toast(e.message?:"保存失败") } } }
         }
     }
     private val activeUploads=mutableSetOf<AttachmentUpload>()
-    private fun uploadFile(uri: Uri,name: String,mime: String,kind: String,recipient: String,caption: String,onDone: (() -> Unit)?=null) {
+    private fun uploadFile(uri: Uri,name: String,mime: String,kind: String,recipient: String,caption: String,quote:JSONObject?=null,onDone: (() -> Unit)?=null,onResult:((JSONObject?,String?)->Unit)?=null) {
         val session=Hub.token
         lateinit var task:AttachmentUpload
-        task=AttachmentUpload(this,uri,name,mime,kind,recipient,caption){message,error ->
-            activeUploads.remove(task);onDone?.invoke()
+        task=AttachmentUpload(this,uri,name,mime,kind,recipient,caption,messageQuote=quote?.let{JSONObject(it.toString())}){message,error ->
+            activeUploads.remove(task);onDone?.invoke();onResult?.invoke(message,error)
             if(Hub.token==session&&!isDestroyed&&!isFinishing) {
                 if(message!=null){if(peer?.optString("id")==recipient)appendMessage(message)else toast("附件已加入待发消息")}
                 else if(error!=null)toast(error)
@@ -1464,41 +1524,84 @@ class MainActivity : Activity() {
         activeUploads.add(task);trackDialog(task.dialog);task.start()
     }
     private fun startRecording() {
-        if(!contactGuard())return
-        if(recording!=null)return
-        hideKeyboard(); stopPlayer()
-        try {
-            recordFile=File(cacheDir,"voice-${UUID.randomUUID()}.m4a")
-            val recorder=if(Build.VERSION.SDK_INT>=31)MediaRecorder(this) else MediaRecorder()
-            recording=recorder
-            recorder.setAudioSource(MediaRecorder.AudioSource.MIC); recorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4); recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
-            recorder.setAudioEncodingBitRate(64000); recorder.setAudioSamplingRate(44100); recorder.setOutputFile(recordFile!!.absolutePath); recorder.prepare(); recorder.start()
-            recording=recorder; recordStart=SystemClock.elapsedRealtime(); recordBar?.visibility=View.VISIBLE
-        } catch(e:Exception) { recording?.release(); recording=null; recordFile?.delete(); toast("无法开始录音，请检查麦克风权限") }
+        if(!contactGuard()||Hub.call!=null||recording!=null||!resumed||!Hub.foreground||isDestroyed||isFinishing)return
+        clearReadyVoice();hideKeyboard();stopPlayer();inputPanel?.hide()
+        val staged=cacheDir.listFiles()?.filter{it.isFile&&it.name.matches(Regex("voice-[0-9a-f-]{36}\\.m4a"))}?.sumOf{it.length()}?:0L
+        if(staged>=8L*1024*1024){toast("录音暂存较多，请等待发送完成");return}
+        try{
+            val id=UUID.randomUUID().toString();val file=File(cacheDir,"voice-$id.m4a")
+            recordOwner=Hub.me.optString("id");recordSession=Hub.token;recordPeer=peer?.optString("id").orEmpty();recordFile=file;recordQuoteRef=replyTarget;recordQuote=replyTarget?.let{JSONObject(it.toString())}
+            val recorder=if(Build.VERSION.SDK_INT>=31)MediaRecorder(this)else MediaRecorder();recording=recorder
+            recorder.setAudioSource(MediaRecorder.AudioSource.MIC);recorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4);recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+            recorder.setAudioEncodingBitRate(64000);recorder.setAudioSamplingRate(44100);recorder.setMaxDuration(60000);recorder.setMaxFileSize(2L*1024*1024);recorder.setOutputFile(file.absolutePath)
+            recorder.setOnInfoListener{source,what,_->if(recording===source&&what in listOf(MediaRecorder.MEDIA_RECORDER_INFO_MAX_DURATION_REACHED,MediaRecorder.MEDIA_RECORDER_INFO_MAX_FILESIZE_REACHED))stopRecording(false,true)}
+            recorder.setOnErrorListener{source,_,_->if(recording===source){stopRecording(false);toast("录音中断，请重试")}}
+            recorder.prepare();recorder.start();recordStart=SystemClock.elapsedRealtime();renderRecordingUi()
+        }catch(_:Exception){runCatching{recording?.release()};recording=null;recordFile?.delete();recordFile=null;renderRecordingUi();toast("无法开始录音，请检查麦克风权限")}
     }
-    private fun stopRecording(send: Boolean) {
-        val recorder=recording ?: return; val file=recordFile ?: return; recording=null; recordBar?.visibility=View.GONE
-        val seconds=(SystemClock.elapsedRealtime()-recordStart)/1000
-        var valid=true
-        try { recorder.stop() } catch(_:Exception) { valid=false }; recorder.release()
-        val recipient=peer?.optString("id")
-        if(send && valid && seconds>=1 && recipient!=null) uploadFile(Uri.fromFile(file),"语音消息.m4a","audio/mp4","voice",recipient,"${seconds}″") { file.delete() }
-        else { file.delete(); if(send)toast("录音太短，请至少说一秒") }
-        recordFile=null
+    private fun stopRecording(send:Boolean,preview:Boolean=false){
+        val recorder=recording?:return;val file=recordFile;recording=null;recordFile=null
+        val stopped=runCatching{recorder.stop()}.isSuccess;runCatching{recorder.release()}
+        val owner=recordOwner;val session=recordSession;val target=recordPeer;val quote=recordQuote;val reference=recordQuoteRef
+        recordOwner="";recordSession="";recordPeer="";recordQuote=null;recordQuoteRef=null
+        if(file!=null&&(send||preview)&&Hub.token==session&&Hub.me.optString("id")==owner&&peer?.optString("id")==target&&!isDestroyed&&!callScreen){
+            val measured=runCatching{val metadata=MediaMetadataRetriever();try{metadata.setDataSource(file.absolutePath);metadata.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toIntOrNull()}finally{metadata.release()}}.getOrNull()
+            val duration=measured?:((SystemClock.elapsedRealtime()-recordStart).coerceIn(0,65000)).toInt()
+            if((stopped||measured!=null)&&duration in 1000..65000&&file.length() in 1..2L*1024*1024){readyVoice=ReadyVoice(UUID.randomUUID().toString(),file,owner,session,target,duration,quote,reference);voiceDraftError="";if(send)sendReadyVoice()}
+            else{file.delete();toast("录音未完成，请至少录制一秒")}
+        }else file?.delete()
+        renderRecordingUi()
     }
-    private fun stopPlayer() { player?.release(); player=null; playingId="" }
-    private fun playVoice(m: JSONObject) {
-        if(playingId==m.optString("id")) { stopPlayer(); renderMessages(false); return }
-        stopPlayer(); val f=m.optJSONObject("file") ?: return
-        playingId=m.getString("id"); renderMessages(false)
-        val current=playingId;val session=Hub.token;val generation=chatGeneration
-        Hub.io.execute {
-            try { val file=Hub.cachedFile(f); Hub.main.post {
-                if(playingId!=current||Hub.token!=session||generation!=chatGeneration||isDestroyed)return@post
-                try { player=MediaPlayer().apply { setDataSource(file.absolutePath); setOnCompletionListener { stopPlayer(); renderMessages(false) }; setOnErrorListener { _,_,_ -> stopPlayer(); toast("无法播放语音"); renderMessages(false); true };setOnPreparedListener{media->if(player===media&&playingId==current&&Hub.token==session)media.start()};prepareAsync() } }
-                catch(_:Exception) { stopPlayer(); toast("无法播放语音"); renderMessages(false) }
-            } } catch(e:Exception) { Hub.main.post { if(Hub.token==session&&generation==chatGeneration){stopPlayer();toast(e.message?:"语音下载失败");renderMessages(false)} } }
+    private fun readyMatches(clip:ReadyVoice)=Hub.token==clip.session&&Hub.me.optString("id")==clip.owner&&peer?.optString("id")==clip.peer&&!isDestroyed&&!isFinishing
+    private fun clearReadyVoice(){
+        val old=readyVoice;readyVoice=null;voiceDraftError=""
+        if(old!=null){voicePlayback?.forget("draft|"+old.id);old.file.delete()};renderRecordingUi()
+    }
+    private fun renderRecordingUi(){
+        val clip=readyVoice?.takeIf{readyMatches(it)}
+        if(recording!=null||clip!=null)inputPanel?.hide()
+        inputRowView?.visibility=if(recording!=null||clip!=null)View.GONE else View.VISIBLE
+        recorderButton?.isEnabled=recording==null&&clip==null
+        recordBar?.visibility=if(recording!=null)View.VISIBLE else View.GONE
+        voiceDraftRow?.visibility=if(clip!=null)View.VISIBLE else View.GONE
+        if(clip!=null){
+            val state=voicePlayback?.state("draft|"+clip.id);val playing=state?.phase=="playing";val glyph=if(playing)"pause"else"play"
+            voiceDraftPlay?.let{v->if(voiceDraftIcon!=glyph||v.childCount==0){voiceDraftIcon=glyph;v.removeAllViews();v.addView(Glyph(this,glyph,accent),FrameLayout.LayoutParams(dp(21),dp(21),Gravity.CENTER))};v.contentDescription=if(playing)"暂停试听"else"试听录音"}
+            val value=if(voiceDraftError.isNotEmpty())voiceDraftError else if(playing)"试听 "+VoiceMessageView.clock(state?.position?:0)+" / "+VoiceMessageView.clock(clip.duration)else VoiceMessageView.clock(clip.duration)+" · 待发送"
+            if(voiceDraftCaption?.text?.toString()!=value)voiceDraftCaption?.text=value
         }
+    }
+    private fun previewReadyVoice(){
+        val clip=readyVoice?:return;if(!readyMatches(clip)||Hub.call!=null||recording!=null)return
+        voiceController().toggle("draft|"+clip.id,{readyVoice===clip&&readyMatches(clip)&&resumed&&Hub.foreground&&!callScreen&&Hub.call==null}){_,cancelled->check(!cancelled()&&clip.file.isFile);clip.file}
+    }
+    private fun sendReadyVoice(){
+        val clip=readyVoice?:return;if(!readyMatches(clip)||Hub.call!=null)return
+        val generation=chatGeneration;val editor=composer;val originalText=editor?.text?.toString()
+        voicePlayback?.forget("draft|"+clip.id);readyVoice=null;voiceDraftError="";renderRecordingUi()
+        uploadFile(Uri.fromFile(clip.file),"语音消息.m4a","audio/mp4","voice",clip.peer,"${(clip.duration+999)/1000}″",quote=clip.quote,onResult={message,error->
+            if(message!=null){clip.file.delete();consumeReply(clip.quoteRef,clip.peer,clip.session)}
+            else if(readyMatches(clip)&&generation==chatGeneration&&composer===editor&&composer?.text?.toString()==originalText&&readyVoice==null&&recording==null&&resumed){readyVoice=clip;voiceDraftError="发送失败，录音已保留";renderRecordingUi()}
+            else clip.file.delete()
+        })
+    }
+    private fun voiceKey(m:JSONObject)=m.optString("id")+"|"+(m.optJSONObject("file")?.optString("id").orEmpty())
+    private fun voiceController():VoicePlayback{
+        voicePlayback?.let{return it}
+        return VoicePlayback(this){key->
+            val controller=voicePlayback
+            player=controller?.media;playingId=controller?.activeKey?.substringBefore('|').orEmpty()
+            voiceViews[key]?.render(controller?.state(key)?:VoicePlayback.State(key));if(key.startsWith("draft|"))renderRecordingUi()
+        }.also{voicePlayback=it}
+    }
+    private fun stopPlayer(){voicePlayback?.stop();player=null;playingId=""}
+    private fun playVoice(m:JSONObject){
+        if(Hub.call!=null||recording!=null){toast("请先结束通话或录音");return}
+        val file=m.optJSONObject("file")?:return;val key=voiceKey(m);val id=m.optString("id");val fid=file.optString("id")
+        val session=Hub.token;val owner=Hub.me.optString("id");val target=peer?.optString("id");val generation=chatGeneration
+        finishTextSelection();messageMenu?.dismiss()
+        val valid={Hub.token==session&&Hub.me.optString("id")==owner&&peer?.optString("id")==target&&generation==chatGeneration&&resumed&&Hub.foreground&&!isDestroyed&&!callScreen&&Hub.call==null&&recording==null&&messages.any{it.optString("id")==id&&!it.optBoolean("withdrawn")&&!it.optBoolean("decrypt_failed")&&it.optBoolean("attachment_available",true)&&it.optJSONObject("file")?.optString("id")==fid}}
+        voiceController().toggle(key,valid){tag,cancelled->Hub.cachedFile(file,tag,cancelled)}
     }
     private fun loadImage(f: JSONObject,view: ImageView) {
         val session=Hub.token;val active=java.util.concurrent.atomic.AtomicBoolean(true)
@@ -1540,7 +1643,7 @@ class MainActivity : Activity() {
         if(peer?.optBoolean("bot")==true && peer?.optBoolean("bot_calls_enabled")!=true){toast("开发者暂未启用机器人通话");return}
         if(!Hub.connected) { toast("正在连接服务器，请稍后再试"); return }
         if(Hub.call!=null) { toast("你正在通话中");showCall(); return }
-        if(recording!=null)stopRecording(false)
+        if(recording!=null)stopRecording(false,true)
         val u=peer ?: return
         permission(if(video)arrayOf(Manifest.permission.RECORD_AUDIO,Manifest.permission.CAMERA) else arrayOf(Manifest.permission.RECORD_AUDIO)) {
             hideKeyboard(); stopPlayer(); Hub.service?.update(true,video)
@@ -1570,7 +1673,7 @@ class MainActivity : Activity() {
     private fun showCall() {
         cancelVoiceText()
         val c=Hub.call ?: return
-        if(recording!=null)stopRecording(false)
+        if(recording!=null)stopRecording(false,true)
         hideKeyboard(); stopPlayer(); callScreen=true; reset(palette.callBottom)
         root.background=GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,intArrayOf(palette.callTop,palette.callBottom))
         window.decorView.systemUiVisibility=0; window.statusBarColor=palette.callBottom; window.navigationBarColor=palette.callBottom
@@ -1788,6 +1891,7 @@ class MainActivity : Activity() {
         if(authScreen?.back()==true)return
         if(messageMenu?.isShowing==true){finishTextSelection();messageMenu?.dismiss();return}
         if(selecting){endMessageSelection();return}
+        if(inputPanel?.opened==true){inputPanel?.hide();return}
         if(callScreen && Hub.call!=null) { toast("请使用挂断按钮结束通话"); return }
         if(peer!=null)leaveChat() else super.onBackPressed()
     }

@@ -12,6 +12,7 @@ class Glyph(context: Context, private val kind: String, var color: Int = Color.r
         fun line(vararg xy: Float) { val path = Path(); path.moveTo(xy[0], xy[1]); for (i in 2 until xy.size step 2) path.lineTo(xy[i], xy[i+1]); c.drawPath(path, p) }
         fun round(l: Float,t: Float,r: Float,b: Float,rad:Float=3f) { c.drawRoundRect(l,t,r,b,rad,rad,p) }
         when (kind) {
+            "reply" -> { line(9f,5f,3f,11f,9f,17f);val path=Path();path.moveTo(3f,11f);path.lineTo(13f,11f);path.cubicTo(18f,11f,21f,14f,21f,20f);c.drawPath(path,p) }
             "pin" -> { line(8f,3f,16f,3f);line(9f,3f,9f,9f,5f,14f,19f,14f,15f,9f,15f,3f);line(12f,14f,12f,22f) }
             "bellOff" -> { c.drawArc(6f,3f,18f,16f,180f,180f,false,p);line(6f,9f,6f,15f,3f,18f,21f,18f,18f,15f,18f,9f);line(3f,3f,21f,21f) }
             "eye" -> { val path=Path();path.moveTo(2f,12f);path.cubicTo(7f,3f,17f,3f,22f,12f);path.cubicTo(17f,21f,7f,21f,2f,12f);c.drawPath(path,p);c.drawCircle(12f,12f,3f,p) }
@@ -44,7 +45,8 @@ class Glyph(context: Context, private val kind: String, var color: Int = Color.r
             "image" -> { round(3f,3f,21f,21f); c.drawCircle(8f,8f,1.5f,p); line(4f,18f,10f,12f,14f,16f,17f,13f,21f,18f) }
             "file" -> { line(5f,3f,14f,3f,20f,9f,20f,21f,5f,21f,5f,3f); line(14f,3f,14f,9f,20f,9f); line(9f,14f,16f,14f); line(9f,17f,14f,17f) }
             "code" -> { line(7f,6f,2f,12f,7f,18f); line(17f,6f,22f,12f,17f,18f); line(14f,3f,10f,21f) }
-            "mic", "micOff" -> { round(9f,2f,15f,15f); c.drawArc(6f,7f,18f,19f,0f,180f,false,p); line(12f,19f,12f,22f); if(kind=="micOff") line(3f,3f,21f,21f) }
+            "mic", "micOff", "dictate" -> { round(9f,2f,15f,15f); c.drawArc(6f,7f,18f,19f,0f,180f,false,p); line(12f,19f,12f,22f); if(kind=="micOff") line(3f,3f,21f,21f) }
+            "stop" -> { p.style=Paint.Style.FILL;c.drawRoundRect(5f,5f,19f,19f,3f,3f,p) }
             "send" -> { line(3f,4f,22f,12f,3f,20f,6f,12f,3f,4f); line(6f,12f,15f,12f) }
             "smile" -> { c.drawCircle(12f,12f,9f,p); c.drawCircle(8.5f,9f,.6f,p); c.drawCircle(15.5f,9f,.6f,p); c.drawArc(7f,10f,17f,17f,15f,150f,false,p) }
             "speaker" -> { line(3f,9f,7f,9f,12f,5f,12f,19f,7f,15f,3f,15f,3f,9f); c.drawArc(10f,7f,20f,17f,-55f,110f,false,p); c.drawArc(8f,3f,26f,21f,-55f,110f,false,p) }

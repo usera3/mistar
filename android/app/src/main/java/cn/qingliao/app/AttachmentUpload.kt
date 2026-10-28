@@ -14,7 +14,7 @@ import java.util.concurrent.atomic.AtomicInteger
 
 /** At most two running/four queued uploads. Cancellation never deletes the user's chosen file. */
 class AttachmentUpload(private val activity:Activity,private val uri:Uri,private val name:String,private val mime:String,
-    private val kind:String,private val peer:String,private val caption:String,private val showProgress:Boolean=true,private val guard:()->Boolean={true},private val done:(JSONObject?,String?)->Unit) {
+    private val kind:String,private val peer:String,private val caption:String,private val showProgress:Boolean=true,private val guard:()->Boolean={true},private val messageQuote:JSONObject?=null,private val done:(JSONObject?,String?)->Unit) {
     companion object {
         private val executor=ThreadPoolExecutor(2,2,30,TimeUnit.SECONDS,ArrayBlockingQueue<Runnable>(4))
         private val timers=Executors.newSingleThreadScheduledExecutor()
@@ -83,8 +83,12 @@ class AttachmentUpload(private val activity:Activity,private val uri:Uri,private
             val metadata=JSONObject().put("id",uploaded).put("name",safeName).put("mime",safeMime).put("size",size).put("crypto",key).put("context",context)
             val client=UUID.randomUUID().toString();queuedClient=client
             val payload=JSONObject().put("recipient",peer).put("type",kind).put("text",caption).put("file_id",uploaded).put("private_file",metadata).put("client_id",client)
+            messageQuote?.let{payload.put("quote",JSONObject(it.toString()))}
+            // Linearize cancellation before durable queue entry. Once commit starts, the message
+            // belongs to Outbox; cancelling a dialog cannot safely retract a possibly delivered item.
+            check(state.compareAndSet(0,3)){reason}
             result=Outbox.queue(payload,session,owner)
-            check(state.compareAndSet(0,2)){reason}
+            state.set(2)
         }catch(e:Exception){error=if(state.get()==1)reason else e.message?:"附件发送失败"}
         finally {
             deadline.cancel(false);call=null;runCatching{input?.close()};input=null;encrypted?.delete()
@@ -92,7 +96,7 @@ class AttachmentUpload(private val activity:Activity,private val uri:Uri,private
                 if(queuedClient.isNotEmpty())LocalData.remove(owner,queuedClient)
                 if(uploaded.isNotEmpty())runCatching{Hub.rawApi("DELETE","/api/storage/files/$uploaded",session=session)}
             }
-            state.compareAndSet(0,1)
+            state.compareAndSet(0,1);state.compareAndSet(3,1)
             Hub.main.post{dialog.dismiss();done(if(state.get()==2)result else null,error)}
         }
     }

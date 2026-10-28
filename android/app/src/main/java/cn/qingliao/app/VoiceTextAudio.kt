@@ -86,12 +86,12 @@ internal object VoiceTextAudio {
         fun finish():Encoded {check();require(samples in 1600..16000*60+4800){"未找到有效的60秒以内语音"};if(at>0){java.util.Arrays.fill(frame,at,320,0.toShort());out.write(DictationCodec.packet(encoder,frame))};return Encoded(out.toByteArray(),samples)}
     }
     fun encode(file:File,check:()->Unit={}):Encoded {
-        check();require(file.isFile&&file.length() in 1..MAX_BYTES){"转文字支持5MB以内的语音"}
+        check();require(file.isFile&&file.length() in 1..MAX_BYTES){"转文字支持5MB以内的语音"};LocalAudio.requireContainer(file)
         val started=SystemClock.elapsedRealtime()
         val bounded={check();require(SystemClock.elapsedRealtime()-started<20000){"语音解码超时，请重试"}}
         val extractor=MediaExtractor();var codec:MediaCodec?=null
         try{
-            extractor.setDataSource(file.absolutePath)
+            file.inputStream().use{extractor.setDataSource(it.fd,0,file.length())}
             require(extractor.trackCount in 1..8){"语音文件无法读取"}
             val track=(0 until extractor.trackCount).firstOrNull{extractor.getTrackFormat(it).getString(MediaFormat.KEY_MIME)?.startsWith("audio/")==true}?:throw IllegalArgumentException("文件中没有语音")
             val format=extractor.getTrackFormat(track);val mime=format.getString(MediaFormat.KEY_MIME)?:error("Missing audio type")
