@@ -14,6 +14,7 @@ import org.json.*
 import org.webrtc.*
 import java.io.File
 import java.nio.ByteBuffer
+import java.security.MessageDigest
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
@@ -21,6 +22,7 @@ import java.util.concurrent.atomic.AtomicInteger
 /** Owned emulators only: real system grant, capture and local DTLS-SRTP peers, synthetic pixels. */
 internal object ScreenShareTests {
     fun run(i:Instrumentation):String {
+        val oldHttp=Hub.http;val oldUpdates=AppUpdates.transport
         val folder=File(i.targetContext.getExternalFilesDir(null),"screen-share").apply{mkdirs()};val checks=JSONArray()
         fun stage(s:String){File(folder,"progress.txt").writeText(s)}
         fun ui(f:()->Unit){if(Looper.myLooper()==Looper.getMainLooper())f()else i.runOnMainSync{f()}}
@@ -74,6 +76,7 @@ internal object ScreenShareTests {
         ui{
             Hub.token="synthetic-screen-session";Hub.me=JSONObject().put("id",owner).put("nickname","屏幕测试").put("admin_password_change_required",true);Hub.connected=false
             Hub.http=OkHttpClient.Builder().addInterceptor{c->Response.Builder().request(c.request()).protocol(Protocol.HTTP_1_1).code(200).message("Local screen test only").body(JSONObject().put("contacts",JSONArray()).put("conversations",JSONArray()).toString().toResponseBody()).build()}.build()
+            AppUpdates.transport=Hub.http
         }
         val activity=i.startActivitySync(Intent(i.targetContext,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
         var marker:Activity?=null
@@ -123,7 +126,7 @@ internal object ScreenShareTests {
             invoke(activity,"toggleScreenSharing");grant();await("projection service and screen video source active"){engine.sharingScreen&&receiverMode.get()=="screen"};capture("sharing-call")
             val manager=i.targetContext.getSystemService(NotificationManager::class.java)
             val stop=manager.activeNotifications.first{it.id==108}.notification.actions.first{it.title.toString()=="停止共享"}.actionIntent
-            marker=i.startActivitySync(Intent(i.targetContext,ThemeActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            marker=i.startActivitySync(Intent(i.targetContext,ThemeActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_USER_ACTION))
             ui{marker!!.overridePendingTransition(0,0);marker!!.setContentView(object:View(marker){init{setWillNotDraw(false)};var tick=0;override fun onDraw(c:Canvas){c.drawColor(Color.rgb(32,64,224));c.drawRect(0f,height/2f,width.toFloat(),height.toFloat(),Paint().apply{color=Color.rgb(240,208,32)});c.drawText("SYNTHETIC SCREEN",24f,96f,Paint().apply{color=Color.WHITE;textSize=36f});c.drawRect((tick++%maxOf(1,width)).toFloat(),120f,(tick%maxOf(1,width)+8).toFloat(),140f,Paint().apply{color=Color.WHITE});postInvalidateOnAnimation()}})}
             val target=marked.get()+8;await("synthetic blue/yellow display pixels decoded by remote peer"){marked.get()>=target}
             File(folder,"remote-screen.png").outputStream().use{frameBitmap.get()!!.compress(Bitmap.CompressFormat.PNG,100,it)}
@@ -152,6 +155,7 @@ internal object ScreenShareTests {
             ui{Hub.endLocalCall()};await("hangup releases capture and foreground indicator"){manager.activeNotifications.none{it.id==108}&&!engine.sharingScreen}
             checks.put("hangup disposes capture and indicator; no restart or camera re-enable")
             val result=JSONObject().put("passed",true).put("api",Build.VERSION.SDK_INT).put("realProjectionGrant",true).put("syntheticPixelsOnly",true).put("localDtlsSrtp",true).put("decodedFrames",count.get()).put("markedFrames",marked.get()).put("audioBytesBefore",audioBefore).put("audioBytesDuring",audioDuring).put("checks",checks).put("physicalDeviceTests",false).put("realUserMessagesOrCalls",0)
+            result.put("apkSha256",MessageDigest.getInstance("SHA-256").digest(File(i.targetContext.applicationInfo.sourceDir).readBytes()).joinToString(""){"%02x".format(it.toInt()and 255)})
             File(folder,"result.json").writeText(result.toString(2));stage("PASS complete");return "PASS native screen sharing: "+result.toString()
         }finally{
             File(folder,"frame-metrics.txt").writeText("frames=${count.get()} marked=${marked.get()} black=${black.get()} size=${lastW.get()}x${lastH.get()} ${colors.get()}")
@@ -159,7 +163,7 @@ internal object ScreenShareTests {
             shell("wm size reset")
             acceptFrames.set(false)
             frameBitmap.getAndSet(null)?.recycle()
-            ui{marker?.finish();data?.unregisterObserver();data?.dispose();receiver?.close();receiver?.dispose();receiverFactory?.dispose();if(engineCreated)engine.release();Hub.rtc=null;Hub.call=null;Hub.phase="";Hub.logout();activity.finish()}
+            ui{marker?.finish();data?.unregisterObserver();data?.dispose();receiver?.close();receiver?.dispose();receiverFactory?.dispose();invoke(activity,"releaseRenderers");if(engineCreated)engine.release();Hub.rtc=null;Hub.call=null;Hub.phase="";Hub.logout();activity.finish();Hub.http=oldHttp;AppUpdates.transport=oldUpdates}
         }
     }
 }

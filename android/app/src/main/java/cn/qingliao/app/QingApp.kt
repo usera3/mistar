@@ -478,9 +478,11 @@ class ChatService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int { if (Hub.token.isEmpty()) { stopSelf(); return START_NOT_STICKY }; Hub.connect(); return START_STICKY }
     fun update(media: Boolean = false, video: Boolean = false) {
         val pending = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
-        val notification = NotificationCompat.Builder(this, "connection").setSmallIcon(R.drawable.ic_notification).setContentTitle("弥星")
-            .setContentText(if (Hub.call != null) "通话进行中" else if (Hub.connected) "消息服务已连接" else "正在重新连接…")
-            .setContentIntent(pending).setOngoing(true).build()
+        val builder = NotificationCompat.Builder(this, "connection").setSmallIcon(R.drawable.ic_notification).setContentTitle(if(Hub.call!=null)"弥星通话"else"弥星")
+            .setContentText(if (Hub.call != null) "通话进行中 · 点按返回" else if (Hub.connected) "消息服务已连接" else "正在重新连接…")
+            .setContentIntent(pending).setOngoing(true)
+        if(Hub.call!=null&&Hub.phase in listOf("outgoing","connecting","connected","reconnecting"))builder.addAction(R.drawable.ic_call_end,"挂断",CallActions.pending("hangup"))
+        val notification=builder.build()
         if (Build.VERSION.SDK_INT >= 34) {
             var type = ServiceInfo.FOREGROUND_SERVICE_TYPE_REMOTE_MESSAGING
             if (media || Hub.rtc != null) type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE

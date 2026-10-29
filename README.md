@@ -15,7 +15,7 @@
 - **会话与草稿**：本机加密草稿（文字、引用、光标）、置顶、消息免打扰与连续消息列表；仅搜索本机保存的联系人、文字和文件名，支持定位上下文。
 - **消息操作**：深灰双排长按浮层、原生文字选区及部分复制、引用、删除/撤回、多选、批量删除和逐条转发；转发附件重新加密。
 - **输入与语音**：功能/表情抽屉、向右滑动引用；语音暂停续播、拖动与1/1.5/2倍速；录音试听、手动发送及当前页面失败重试，60秒上限不会自动发送。
-- **音视频**：用户间语音/视频通话，视频通话共享屏幕，系统授权及通知停止，断线与忙线反馈。
+- **音视频**：视频铺满窗口、点击隐藏操作栏、小窗交换双方画面、完整/铺满切换；屏幕共享、桌面系统画中画、断线与忙线反馈。
 - **语音转文字**：长按语音选择“转文字”即开始，原消息下展示进度与文字；另有麦克风听写、预览和手动发送。
 - **好友动态**：文字、图片、视频、语音、视频静态封面、点赞、评论及草稿。公共广场默认关闭。
 - **个人与主题**：头像裁剪、昵称、自选主题颜色；默认紫色星光与岛屿风格。
@@ -31,6 +31,8 @@
 <p><img src="docs/images/input-tools.png" width="230" alt="原生功能和表情面板"> <img src="docs/images/voice-player.png" width="230" alt="语音进度与倍速"> <img src="docs/images/voice-preview.png" width="230" alt="录音试听和手动发送"></p>
 
 [会话体验对照、实现与验证范围](CHAT_EXPERIENCE.md)
+
+<p><img src="docs/images/video-call.png" width="230" alt="合成色块验证视频铺满与浮动操作栏"> <img src="docs/images/call-pip.png" width="230" alt="模拟器系统通话小窗"></p>
 
 ## 源码结构
 
@@ -69,7 +71,7 @@ python tools/run_backend_tests.py
 
 ## 协议与使用说明
 
-[消息操作](MESSAGE_ACTIONS.md) · [会员与支付](MEMBERSHIP.md) · [机器人 API](BOT_API.md) · [机器人通话](BOT_CALLS.md) · [语音输入](DICTATION.md) · [屏幕共享](SCREENSHARE.md) · [管理员](ADMIN.md) · [更新发布](UPDATES.md) · [资源与滥用限制](DEFENSE.md)
+[消息操作](MESSAGE_ACTIONS.md) · [通话界面与小窗](CALL_UI.md) · [会员与支付](MEMBERSHIP.md) · [机器人 API](BOT_API.md) · [机器人通话](BOT_CALLS.md) · [语音输入](DICTATION.md) · [屏幕共享](SCREENSHARE.md) · [管理员](ADMIN.md) · [更新发布](UPDATES.md) · [资源与滥用限制](DEFENSE.md)
 
 ## 加密与边界
 

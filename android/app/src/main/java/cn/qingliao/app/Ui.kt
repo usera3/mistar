@@ -12,6 +12,7 @@ class Glyph(context: Context, private val kind: String, var color: Int = Color.r
         fun line(vararg xy: Float) { val path = Path(); path.moveTo(xy[0], xy[1]); for (i in 2 until xy.size step 2) path.lineTo(xy[i], xy[i+1]); c.drawPath(path, p) }
         fun round(l: Float,t: Float,r: Float,b: Float,rad:Float=3f) { c.drawRoundRect(l,t,r,b,rad,rad,p) }
         when (kind) {
+            "minimize" -> { round(3f,4f,21f,20f,2f);round(12f,12f,19f,18f,1f) }
             "reply" -> { line(9f,5f,3f,11f,9f,17f);val path=Path();path.moveTo(3f,11f);path.lineTo(13f,11f);path.cubicTo(18f,11f,21f,14f,21f,20f);c.drawPath(path,p) }
             "pin" -> { line(8f,3f,16f,3f);line(9f,3f,9f,9f,5f,14f,19f,14f,15f,9f,15f,3f);line(12f,14f,12f,22f) }
             "bellOff" -> { c.drawArc(6f,3f,18f,16f,180f,180f,false,p);line(6f,9f,6f,15f,3f,18f,21f,18f,18f,15f,18f,9f);line(3f,3f,21f,21f) }
