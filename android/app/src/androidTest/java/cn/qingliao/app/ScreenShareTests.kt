@@ -112,7 +112,7 @@ internal object ScreenShareTests {
                     override fun onRemoveStream(s:MediaStream){}
                     override fun onRenegotiationNeeded(){}
                     override fun onAddTrack(r:RtpReceiver,s:Array<out MediaStream>){(r.track() as? VideoTrack)?.addSink(sink)}
-                    override fun onDataChannel(c:DataChannel){data=c;c.registerObserver(object:DataChannel.Observer{override fun onBufferedAmountChange(a:Long){};override fun onStateChange(){};override fun onMessage(b:DataChannel.Buffer){val bytes=ByteArray(b.data.remaining());b.data.get(bytes);receiverMode.set(JSONObject(String(bytes)).optString("mode"))}})}
+                    override fun onDataChannel(c:DataChannel){if(c.label()!="xingyu.video-mode.v1"){Hub.main.post{c.close();c.dispose()};return};data=c;c.registerObserver(object:DataChannel.Observer{override fun onBufferedAmountChange(a:Long){};override fun onStateChange(){};override fun onMessage(b:DataChannel.Buffer){val bytes=ByteArray(b.data.remaining());b.data.get(bytes);receiverMode.set(JSONObject(String(bytes)).optString("mode"))}})}
                 })!!
             }
             await("native DTLS-SRTP connected and camera frames received"){engine.mediaConnected&&count.get()>4&&data?.state()==DataChannel.State.OPEN}

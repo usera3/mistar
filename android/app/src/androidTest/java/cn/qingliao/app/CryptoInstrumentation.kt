@@ -22,6 +22,7 @@ class CryptoInstrumentation:Instrumentation() {
     override fun onStart() {
         try {
             waitForIdleSync()
+            if(mode=="remoteAssist"){val result=RemoteAssistTests.run(this,peer);finish(Activity.RESULT_OK,Bundle().apply{putString("result",result)});return}
             if(mode=="callUi"){val result=CallUiTests.run(this,peer);finish(Activity.RESULT_OK,Bundle().apply{putString("result",result)});return}
             if(mode=="chatPolish"){val result=ChatPolishTests.run(this,peer);finish(Activity.RESULT_OK,Bundle().apply{putString("result",result)});return}
             if(mode=="conversations"){val result=ConversationTests.run(this,peer);finish(Activity.RESULT_OK,Bundle().apply{putString("result",result)});return}

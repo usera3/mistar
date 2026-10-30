@@ -190,6 +190,10 @@ class MainActivity : Activity() {
     private var pipCard:View?=null
     private var pipClock:TextView?=null
     private var pipTransition=false
+    private var assistControl:TextView?=null
+    private var assistBar:LinearLayout?=null
+    private var assistSettingsOpen=false
+    private var assistFeedbackRevision=0
     private data class HtmlPreview(val frame: FrameLayout, val placeholder: TextView, val source: String, var web: WebView? = null)
     private val htmlPreviews = mutableListOf<HtmlPreview>()
     private class ChatImage(val view:ImageView,val label:TextView,val file:JSONObject){@Volatile var active=false;var loading=false;var failed=false;var request=0;var bitmap:android.graphics.Bitmap?=null}
@@ -251,7 +255,7 @@ class MainActivity : Activity() {
         handleIntent(intent)
     }
     override fun onResume() {
-        super.onResume();resumed=true;if(!isInPictureInPictureMode)pipTransition=false; val next=ThemeStore.current(this); val changed=next.primary!=palette.primary; palette=next
+        super.onResume();resumed=true;assistSettingsOpen=false;if(!isInPictureInPictureMode)pipTransition=false; val next=ThemeStore.current(this); val changed=next.primary!=palette.primary; palette=next
         Hub.foreground=true; Hub.viewingPeer=peer?.optString("id") ?: ""
         grantedAction?.let{pending->grantedAction=null;if(Hub.token==pending.session&&SystemClock.elapsedRealtime()<=pending.expires)pending.action()else if(Hub.token==pending.session)toast("权限已开启，请重新点击对应功能")}
         AppUpdates.check();AppUpdates.notifyAvailable()
@@ -264,7 +268,7 @@ class MainActivity : Activity() {
         }
         if(Hub.token.isNotEmpty()){refresh();if(peer!=null&&!callScreen)loadVoiceTexts();if(!returningFromPhotoSave&&!returningFromPost)feed?.refresh()};returningFromPhotoSave=false;returningFromPost=false;root.post{if(!isDestroyed){if(voicePaused&&peer!=null&&!callScreen){voicePaused=false;renderMessages(false)};syncHtmlPreviews()}}
     }
-    override fun onPause() { inputPanel?.hide();stashDraft(true);conversationMenu?.dismiss(); resumed=false;finishTextSelection();messageMenu?.dismiss();forwardJob?.cancel();forwardDialog?.dismiss();batchDeleteCancel?.invoke();cancelVoiceText();dictation?.cancel();dictation=null;if(playingId.isNotEmpty()){voicePaused=true;stopPlayer()};pauseChatImages();stopTyping();super.onPause();Hub.foreground=false;Hub.viewingPeer="";if(recording!=null)stopRecording(false,true) }
+    override fun onPause() { if(Hub.rtc?.assist?.let{it.controlling||it.pending}==true)Hub.rtc?.assist?.stopControlling("已离开控制画面");inputPanel?.hide();stashDraft(true);conversationMenu?.dismiss(); resumed=false;finishTextSelection();messageMenu?.dismiss();forwardJob?.cancel();forwardDialog?.dismiss();batchDeleteCancel?.invoke();cancelVoiceText();dictation?.cancel();dictation=null;if(playingId.isNotEmpty()){voicePaused=true;stopPlayer()};pauseChatImages();stopTyping();super.onPause();Hub.foreground=false;Hub.viewingPeer="";if(recording!=null)stopRecording(false,true) }
     override fun onDestroy() { grantedAction=null;if(recording!=null)stopRecording(false);clearReadyVoice();inputPanel?.hide();voicePlayback?.dispose();voicePlayback=null;stashDraft(true);conversationMenu?.dismiss(); authScreen?.dispose();authScreen=null; screenRequest?.let{ScreenSharing.cancelRequest(it)};screenRequest=null;screenApproval?.let{ScreenSharing.cancelRequest(it.first)};screenApproval=null;cancelVoiceText();releaseChatImages();activeUploads.toList().forEach{it.cancel("页面已关闭，已取消发送")};activeUploads.clear();dismissDialogs();feed?.dispose();stopTyping(); Hub.main.removeCallbacks(tick); if(Hub.listener===hubListener)Hub.listener=null;stopPlayer();releaseRenderers();releaseHtmlPreviews();actionSheet?.dismiss();super.onDestroy() }
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
         super.onConfigurationChanged(newConfig)
@@ -1764,8 +1768,9 @@ class MainActivity : Activity() {
     }
     private fun showVideoCall(){
         val c=Hub.call?:return;val engine=Hub.rtc?:return
+        hideKeyboard()
         val session=Hub.token;val owner=Hub.me.optString("id");val id=c.optString("id");val key="$session|$owner|$id"
-        if(callPreferenceKey!=key){callPreferenceKey=key;callVideoState=CallVideoState()}
+        if(callPreferenceKey!=key){callPreferenceKey=key;callVideoState=CallVideoState();assistFeedbackRevision=0}
         if(callScreen&&callViewKey==key&&callViewEngine===engine&&callVideoStage!=null){callVideoStage?.refresh();updateCallControls();updateCallChrome();updatePipParams();return}
         cancelVoiceText();hideKeyboard();stopPlayer();callScreen=true;reset(palette.callBottom,true)
         val valid={Hub.token==session&&Hub.me.optString("id")==owner&&Hub.call?.optString("id")==id&&Hub.rtc===engine&&!isDestroyed&&!isFinishing}
@@ -1780,6 +1785,11 @@ class MainActivity : Activity() {
         shareControl=text("共享屏幕",if(small)11f else 12f,Color.WHITE,true).apply{tag="call.share";gravity=Gravity.CENTER;setPadding(dp(8),0,dp(8),0);minimumHeight=dp(40);background=bg(palette.callSurface,12);setOnClickListener{if(valid())toggleScreenSharing()}};top.addView(shareControl,lp(-2,40))
         top.addView(icon("minimize","悬浮通话",Color.WHITE){if(valid())minimizeCall(true)}.apply{tag="call.minimize"},lp(40,40))
         viewport.addView(top,FrameLayout.LayoutParams(-1,-2,Gravity.TOP))
+        assistBar=row().apply{tag="call.assist.bar";background=bg(0xCC252238.toInt(),12);visibility=View.GONE}
+        assistControl=text("远程协助",if(small)11f else 12f,Color.WHITE,true).apply{tag="call.assist";gravity=Gravity.CENTER;maxLines=1;ellipsize=android.text.TextUtils.TruncateAt.END;minimumHeight=dp(40);setPadding(dp(8),0,dp(8),0);setOnClickListener{if(valid()){val a=engine.assist;if(a.hosting)a.stopHosting()else if(a.controlling||a.pending)a.stopControlling()else assistanceMenu()}}};assistBar!!.addView(assistControl,LinearLayout.LayoutParams(0,-2,1f))
+        assistBar!!.addView(icon("back","对方返回",Color.WHITE){if(valid())engine.assist.sendInput(AssistWire.Input("back"))}.apply{tag="call.assist.back"},lp(36,40))
+        assistBar!!.addView(icon("home","对方桌面",Color.WHITE){if(valid())engine.assist.sendInput(AssistWire.Input("home"))}.apply{tag="call.assist.home"},lp(36,40))
+        viewport.addView(assistBar,FrameLayout.LayoutParams(dp(if(small)164 else 230),-2,Gravity.TOP or Gravity.START))
         val bottom=col().apply{tag="call.controls";gravity=Gravity.CENTER;setOnClickListener{if(valid()&&Hub.phase=="connected"){callVideoState.controlsVisible=!callVideoState.controlsVisible;updateCallChrome()}};background=GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,intArrayOf(Color.TRANSPARENT,0xD0101020.toInt()))};callBottomOverlay=bottom
         callCaption=text("",if(small)11f else 13f,Color.WHITE).apply{gravity=Gravity.CENTER;maxLines=2};bottom.addView(callCaption)
         callClock=text(callClockText(),if(small)11f else 13f,palette.callMuted).apply{gravity=Gravity.CENTER;contentDescription="通话状态"};bottom.addView(callClock);space(bottom,if(small)6 else 14)
@@ -1803,24 +1813,32 @@ class MainActivity : Activity() {
         callTopOverlay?.setPadding(b.left+dp(12),b.top+dp(6),b.right+dp(8),dp(12))
         callBottomOverlay?.setPadding(b.left+dp(8),dp(24),b.right+dp(8),b.bottom+dp(if(compact)8 else 18))
         callVideoStage?.safeInsets(b.left,b.top,b.right,b.bottom)
+        (assistBar?.layoutParams as? FrameLayout.LayoutParams)?.let{p->p.marginStart=b.left+dp(8);p.topMargin=b.top+dp(if(compact)52 else 68);assistBar?.layoutParams=p}
     }
     private fun updateCallChrome(){
         val pip=isInPictureInPictureMode||pipTransition
-        val show=!pip&&(Hub.phase!="connected"||callVideoState.controlsVisible)
+        val assist=Hub.rtc?.assist
+        val show=!pip&&(Hub.phase!="connected"||callVideoState.controlsVisible||assist?.controlling==true)
         callTopOverlay?.visibility=if(show)View.VISIBLE else View.GONE;callBottomOverlay?.visibility=if(show)View.VISIBLE else View.GONE
         callVideoStage?.let{stage->
             stage.presentation(pip);stage.refresh()
-            callScaleControl?.apply{text=if(stage.filled)"完整"else"铺满";contentDescription=if(stage.filled)"完整显示画面"else"铺满屏幕";isEnabled=if(stage.localIsMain)Hub.rtc?.cameraEnabled==true else Hub.rtc?.remoteVideoMode!="off"}
+            callScaleControl?.apply{text=if(assist?.controlling==true||stage.filled)"完整"else"铺满";contentDescription=if(assist?.controlling==true)"控制使用完整画面"else if(stage.filled)"完整显示画面"else"铺满屏幕";isEnabled=assist?.controlling!=true&&(if(stage.localIsMain)Hub.rtc?.cameraEnabled==true else Hub.rtc?.remoteVideoMode!="off");alpha=if(isEnabled)1f else .45f}
             callCaption?.text=(if(stage.localIsMain)"自己"else if(Hub.rtc?.remoteVideoMode=="screen")"对方正在共享屏幕"else displayName(Hub.callUser))+(if(Hub.callUser.optBoolean("bot"))" · 第三方机器人"else"")
         }
         classicTop?.visibility=if(pip)View.GONE else View.VISIBLE;classicControls?.visibility=if(pip)View.GONE else View.VISIBLE;classicIdentity?.visibility=if(pip)View.GONE else View.VISIBLE;pipCard?.visibility=if(pip)View.VISIBLE else View.GONE
         pipClock?.visibility=if(pip)View.VISIBLE else View.GONE
+        assistBar?.visibility=if(!pip&&!Hub.callUser.optBoolean("bot")&&(Hub.rtc?.sharingScreen==true||Hub.rtc?.remoteVideoMode=="screen"||assist?.hosting==true||assist?.controlling==true))View.VISIBLE else View.GONE
+        assistControl?.apply{
+            val value=when{assist?.hosting==true->"停止协助";assist?.controlling==true->"结束控制";assist?.incomingRequest?.isNotEmpty()==true->"对方申请控制";assist?.pending==true->"等待·取消";else->"远程协助"}
+            if(text.toString()!=value)text=value;contentDescription=if(assist?.controlling==true)"正在控制对方，点击结束控制"else if(assist?.pending==true)"等待对方允许，点击取消申请"else value
+        }
+        assistBar?.let{bar->val selected=assist?.controlling==true||assist?.hosting==true;bar.isSelected=selected;bar.background=bg(if(selected)palette.primary else 0xCC252238.toInt(),12);val foreground=if(selected)palette.onPrimary else Color.WHITE;assistControl?.setTextColor(foreground);for(n in 1 until bar.childCount){val button=bar.getChildAt(n);button.visibility=if(assist?.controlling==true)View.VISIBLE else View.GONE;((button as? FrameLayout)?.getChildAt(0) as? Glyph)?.let{it.color=foreground;it.invalidate()}}}
         if(videoEdge){
             window.statusBarColor=Color.TRANSPARENT;window.navigationBarColor=Color.TRANSPARENT
             if(!pip){val bars=WindowCompat.getInsetsController(window,window.decorView);bars.isAppearanceLightStatusBars=false;bars.isAppearanceLightNavigationBars=false;bars.systemBarsBehavior=WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE;if(show)bars.show(WindowInsetsCompat.Type.systemBars())else bars.hide(WindowInsetsCompat.Type.systemBars())}
         }
     }
-    private fun pipEligible()=callScreen&&Hub.token.isNotEmpty()&&Hub.call!=null&&Hub.phase in listOf("outgoing","connecting","connected","reconnecting")&&screenRequest==null&&screenApproval==null&&permissionAction==null&&grantedAction==null&&!isFinishing&&!isDestroyed
+    private fun pipEligible()=callScreen&&Hub.token.isNotEmpty()&&Hub.call!=null&&Hub.phase in listOf("outgoing","connecting","connected","reconnecting")&&screenRequest==null&&screenApproval==null&&permissionAction==null&&grantedAction==null&&!assistSettingsOpen&&!isFinishing&&!isDestroyed
     private fun pipParams():PictureInPictureParams {
         val params=PictureInPictureParams.Builder()
         val video=Hub.call?.optBoolean("video")==true
@@ -1843,15 +1861,51 @@ class MainActivity : Activity() {
         if(!entered&&explicit){toast("系统未允许通话小窗，可从通知栏返回通话");Hub.service?.update();moveTaskToBack(true)}
     }
     private fun toggleScreenSharing(){
+        startScreenSharing(false)
+    }
+    private fun startScreenSharing(wholeDisplay:Boolean){
         if(!resumed||isDestroyed||isFinishing)return
         val engine=Hub.rtc?:return
         if(engine.sharingScreen){ScreenSharing.stop(engine);return}
         if(screenRequest!=null)return
-        val ticket=ScreenSharing.request()?:run{toast("请在视频通话接通后共享屏幕");return}
+        val ticket=ScreenSharing.request(wholeDisplay)?:run{toast("请在视频通话接通后共享屏幕");return}
         screenRequest=ticket
         updatePipParams()
-        try{startActivityForResult(getSystemService(MediaProjectionManager::class.java).createScreenCaptureIntent(),89)}
+        try{val manager=getSystemService(MediaProjectionManager::class.java);val capture=if(wholeDisplay&&Build.VERSION.SDK_INT>=34)manager.createScreenCaptureIntent(android.media.projection.MediaProjectionConfig.createConfigForDefaultDisplay())else manager.createScreenCaptureIntent();startActivityForResult(capture,89)}
         catch(_:Exception){screenRequest=null;ScreenSharing.cancelRequest(ticket);updatePipParams();toast("这台设备暂不支持屏幕共享")}
+    }
+    private fun assistanceMenu(){
+        val engine=Hub.rtc?:return;val a=engine.assist
+        if(Hub.callUser.optBoolean("bot")){toast("机器人通话不支持远程控制");return}
+        if(Hub.phase!="connected"){toast("请在通话接通后使用协助");return}
+        if(!a.peerSupported){toast("对方版本或当前连接不支持远程协助");return}
+        val token=Hub.token;val owner=Hub.me.optString("id");val call=Hub.call?.optString("id")
+        val valid={Hub.token==token&&Hub.me.optString("id")==owner&&Hub.call?.optString("id")==call&&Hub.rtc===engine&&!isDestroyed&&!isFinishing}
+        if(!engine.sharingScreen){
+            if(!a.peerSupported){toast("对方版本或当前连接不支持远程协助");return}
+            if(a.pending){toast("已申请，等待对方允许");return}
+            if(!a.requestControl())toast("请让对方先共享整屏，并保持通话连接")
+            return
+        }
+        val ready=AssistAccessibilityService.available();val full=ScreenSharing.controlShareId(engine)!=null
+        val request=a.incomingRequest
+        val safeName=displayName(Hub.callUser).filter{!it.isISOControl()&&it !in '\u202a'..'\u202e'&&it !in '\u2066'..'\u2069'}.take(32)
+        val description="$safeName（${Hub.callUser.optString("id")}）可点按、长按、滑动，以及返回或桌面。权限最长10分钟，仅用于本次共享；你仍能触摸并随时停止。允许后请由你切换到需要协助的应用。弥星自身、系统授权等界面不接受远程操作。"+(if(!ready)"\n\n首次需要在系统无障碍中开启“弥星远程协助”，返回后再次确认本次允许。开启服务本身不会允许任何人控制。"else"")
+        val dialog=AlertDialog.Builder(this).setTitle(if(request.isNotEmpty())"允许对方协助？"else"远程协助")
+            .setMessage((if(request.isEmpty())"请让对方先点击“远程协助”申请控制。\n\n"else"")+description)
+            .setNegativeButton("关闭",null)
+        if(request.isNotEmpty())dialog.setNeutralButton("拒绝"){_,_->if(valid())a.deny()}
+        when {
+            !ready->dialog.setPositiveButton("开启无障碍"){_,_->if(valid()){
+                assistSettingsOpen=true;updatePipParams()
+                val settings=Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                try{startActivity(settings)}
+                catch(_:Exception){assistSettingsOpen=false;updatePipParams();toast("请在系统无障碍设置中开启弥星远程协助")}
+            }}
+            !full->dialog.setPositiveButton("重新共享整屏"){_,_->if(valid()){ScreenSharing.stop(engine);startScreenSharing(true)}}
+            request.isNotEmpty()->dialog.setPositiveButton("允许本次"){_,_->if(valid()){if(!a.allow(request))toast("申请或共享状态已改变，请重新申请")}}
+        }
+        dialog.showThemed()
     }
     private fun finishScreenApproval(){
         if(!resumed||!Hub.foreground)return
@@ -1878,6 +1932,7 @@ class MainActivity : Activity() {
         box.addView(circle,lp(side,side)); space(box,if(tiny)4 else if(side==48)6 else 10); box.addView(text(label,if(tiny)10f else 12f,palette.callMuted).apply{maxLines=1;ellipsize=android.text.TextUtils.TruncateAt.END}); return box
     }
     private fun releaseRenderers() {
+        assistControl=null;assistBar=null
         callVideoStage?.release();callVideoStage=null;callViewKey="";callViewEngine=null;callViewport=null;callTopOverlay=null;callBottomOverlay=null;callScaleControl=null;callCaption=null;classicTop=null;classicControls=null;classicIdentity=null;pipCard=null;pipClock=null
     }
     private fun composePost(){startActivityForResult(Intent(this,PostActivity::class.java),76);Motion.activityOpen(this)}
@@ -1975,6 +2030,7 @@ class MainActivity : Activity() {
             "call.other_device" -> {if(callScreen){if(peer!=null)showChat()else showHome()};toast("通话已在其他设备处理")}
             "rtc.connected" -> { callClock?.text=callClockText();updateCallControls();updateCallChrome();updatePipParams() }
             "call.video" -> if(Hub.call!=null&&callScreen&&(Hub.foreground||isInPictureInPictureMode))showCall()
+            "call.assist" -> if(Hub.call!=null&&callScreen&&(Hub.foreground||isInPictureInPictureMode)){Hub.rtc?.assist?.let{a->if(a.feedbackRevision!=assistFeedbackRevision){assistFeedbackRevision=a.feedbackRevision;if(resumed&&!isInPictureInPictureMode&&a.feedback.isNotEmpty())toast(a.feedback)}};updateCallChrome()}
             "call.ended", "rtc.ended" -> {
                 if(event.optString("event")=="call.ended"&&Hub.call!=null&&event.optString("call_id")!=Hub.call?.optString("id"))return
                 val remote=Hub.callUser.optString("id")

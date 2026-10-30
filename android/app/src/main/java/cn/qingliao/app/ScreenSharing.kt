@@ -12,7 +12,7 @@ import kotlin.math.max
 /** In-memory, one-use grants bound to this account, call and exact media engine. */
 internal object ScreenSharing {
     data class Request internal constructor(val id:String,internal val owner:String,internal val session:String,
-        internal val callId:String,internal val engine:RtcEngine,internal val created:Long)
+        internal val callId:String,internal val engine:RtcEngine,internal val created:Long,internal val wholeDisplay:Boolean)
     private data class Grant(val request:Request,val data:Intent)
     private data class Active(val request:Request,val service:ScreenShareService)
     private var requested:Request?=null
@@ -25,11 +25,11 @@ internal object ScreenSharing {
     @Suppress("DEPRECATION") fun displaySize():Pair<Int,Int>{val p=Point();Hub.app.getSystemService(WindowManager::class.java).defaultDisplay.getRealSize(p);return dimensions(p.x,p.y)}
     private fun current(r:Request)=Hub.token.isNotEmpty()&&Hub.token==r.session&&Hub.me.optString("id")==r.owner&&
         Hub.call?.optString("id")==r.callId&&Hub.call?.optBoolean("video")==true&&Hub.call?.optBoolean("accepted")==true&&Hub.rtc===r.engine
-    fun request():Request?{
+    fun request(wholeDisplay:Boolean=false):Request?{
         val engine=Hub.rtc?:return null
         if(!Hub.foreground||Hub.phase!="connected"||!engine.canShareScreen||engine.sharingScreen||active!=null||requested!=null||granted!=null)return null
         val call=Hub.call?:return null
-        return Request(UUID.randomUUID().toString(),Hub.me.optString("id"),Hub.token,call.optString("id"),engine,SystemClock.elapsedRealtime()).takeIf{current(it)}?.also{requested=it}
+        return Request(UUID.randomUUID().toString(),Hub.me.optString("id"),Hub.token,call.optString("id"),engine,SystemClock.elapsedRealtime(),wholeDisplay).takeIf{current(it)}?.also{requested=it}
     }
     fun cancelRequest(r:Request){if(requested===r)requested=null;if(granted?.request===r)granted=null}
     fun approve(r:Request,result:Int,data:Intent?):Boolean{
@@ -47,17 +47,18 @@ internal object ScreenSharing {
         try{
             service.beginForeground(r.id,r.owner,r.callId)
             val size=displaySize();r.engine.startScreen(grant.data,size.first,size.second)
-            active=Active(r,service);return true
+            active=Active(r,service);r.engine.assist.sharingChanged();return true
         }catch(_:Exception){service.finish(r.id);error("屏幕共享未能开始，通话仍可继续");return false}
     }
     fun stop(engine:RtcEngine?=Hub.rtc){
         val value=active?:return
         if(value.request.engine!==engine)return
-        active=null;value.request.engine.stopScreen();value.service.finish(value.request.id)
+        active=null;value.request.engine.assist.sharingChanged();value.request.engine.stopScreen();value.service.finish(value.request.id)
     }
     internal fun stopAction(id:String){val value=active?:return;if(value.request.id==id&&current(value.request))stop(value.request.engine)}
     internal fun owns(service:ScreenShareService)=active?.service===service
-    internal fun serviceDestroyed(service:ScreenShareService){if(active?.service===service){val value=active!!;active=null;value.request.engine.stopScreen()}}
+    internal fun serviceDestroyed(service:ScreenShareService){if(active?.service===service){val value=active!!;active=null;value.request.engine.assist.sharingChanged();value.request.engine.stopScreen()}}
+    internal fun controlShareId(engine:RtcEngine):String?=active?.takeIf{it.request.engine===engine&&current(it.request)&&engine.sharingScreen&&(android.os.Build.VERSION.SDK_INT<34||it.request.wholeDisplay)&&engine.capturedWholeDisplay()}?.request?.id
     internal fun engineReleased(engine:RtcEngine){
         if(requested?.engine===engine)requested=null
         if(granted?.request?.engine===engine)granted=null

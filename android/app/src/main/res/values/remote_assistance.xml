@@ -1,0 +1,4 @@
+<resources>
+    <string name="remote_assistance_label">弥星远程协助</string>
+    <string name="remote_assistance_description">仅在你逐次允许的屏幕共享通话中执行对方的点按、长按、滑动和返回操作。本机仍可正常触摸，可通过持续显示的停止按钮撤销。此服务不读取页面文字、通知、联系人或聊天记录；共享画面仍会发送给你通话的对方。停止共享、锁屏或挂断会结束授权。开启服务本身不会允许任何人控制。</string>
+</resources>

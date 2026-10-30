@@ -21,6 +21,19 @@ open class SdpCallback : SdpObserver {
 
 class RtcEngine(private val context: Context,private val sendSignal:(JSONObject)->Unit={Hub.signal("call.signal",JSONObject().put("signal",it))}) {
     val egl = EglBase.create()
+    internal val assist by lazy{RemoteAssist(this)}
+    @Volatile private var frameWidth=0
+    @Volatile private var frameHeight=0
+    @Volatile internal var remoteFrameAt=0L;private set
+    internal val remoteFrameSize get()=frameWidth to frameHeight
+    private val frameInfo=VideoSink{frame->frameWidth=frame.rotatedWidth;frameHeight=frame.rotatedHeight;remoteFrameAt=SystemClock.elapsedRealtime()}
+    private var capturedRawWidth=0
+    private var capturedRawHeight=0
+    internal fun capturedWholeDisplay():Boolean {
+        if(!sharingScreen)return false
+        if(android.os.Build.VERSION.SDK_INT<34)return true
+        val g=AssistAccessibilityService.geometry();return capturedRawWidth==g.width&&capturedRawHeight==g.height
+    }
     private var factory: PeerConnectionFactory? = null
     private var pc: PeerConnection? = null
     private var videoSource: VideoSource? = null
@@ -107,7 +120,7 @@ class RtcEngine(private val context: Context,private val sendSignal:(JSONObject)
                         if (state == PeerConnection.PeerConnectionState.CONNECTED) {
                             mediaConnected=true;Hub.mediaRestored();if(statsTask==null)logStats()
                         } else if(state==PeerConnection.PeerConnectionState.FAILED||state==PeerConnection.PeerConnectionState.DISCONNECTED) {
-                            mediaConnected=false;requestRestart()
+                            mediaConnected=false;assist.sharingChanged();requestRestart()
                         }
                     }
                 }
@@ -119,11 +132,11 @@ class RtcEngine(private val context: Context,private val sendSignal:(JSONObject)
                 override fun onIceCandidatesRemoved(candidates: Array<out IceCandidate>) {}
                 override fun onAddStream(stream: MediaStream) {}
                 override fun onRemoveStream(stream: MediaStream) {}
-                override fun onDataChannel(channel: DataChannel) { Hub.main.post{installModeChannel(channel)} }
+                override fun onDataChannel(channel: DataChannel) { Hub.main.post{if(channel.label()==AssistWire.CHANNEL)assist.install(channel)else installModeChannel(channel)} }
                 override fun onRenegotiationNeeded() {}
                 override fun onAddTrack(receiver: RtpReceiver, streams: Array<out MediaStream>) {
                     val track = receiver.track()
-                    if (track is VideoTrack) Hub.main.post { if (!released) { remoteVideo = track; remoteView?.let { track.addSink(it) } } }
+                    if (track is VideoTrack) Hub.main.post { if (!released) { remoteVideo?.removeSink(frameInfo);remoteVideo = track;track.addSink(frameInfo); remoteView?.let { track.addSink(it) } } }
                     if(track is AudioTrack)Hub.main.post{if(!released){remoteAudio=track;applyAudio()}}
                 }
             }) ?: throw Exception("无法创建通话连接")
@@ -136,6 +149,7 @@ class RtcEngine(private val context: Context,private val sendSignal:(JSONObject)
             pc!!.addTrack(audioTrack, listOf("qingliao"));applyAudio()
             if(video){startCamera();changedVideo()}
             if(caller)installModeChannel(pc!!.createDataChannel("xingyu.video-mode.v1",DataChannel.Init()))
+            if(caller&&video&&!Hub.callUser.optBoolean("bot"))assist.install(pc!!.createDataChannel(AssistWire.CHANNEL,DataChannel.Init()))
             val buffered = signals.toList(); signals.clear(); buffered.forEach { receive(it) }
             if (caller) pc!!.createOffer(localDescription(), MediaConstraints())
         } catch (e: Exception) {
@@ -250,9 +264,9 @@ class RtcEngine(private val context: Context,private val sendSignal:(JSONObject)
         lateinit var screen:ScreenCapturerAndroid
         screen=ScreenCapturerAndroid(permission,object:MediaProjection.Callback(){
             override fun onStop(){Hub.main.post{if(!released&&capturer===screen)ScreenSharing.stop(this@RtcEngine)}}
-            override fun onCapturedContentResize(width:Int,height:Int){Hub.main.post{if(!released&&capturer===screen)resizeScreen(width,height)}}
+            override fun onCapturedContentResize(width:Int,height:Int){Hub.main.post{if(!released&&capturer===screen){capturedRawWidth=width;capturedRawHeight=height;resizeScreen(width,height);assist.sharingChanged()}}}
         })
-        replaceInput(screen,true,width,height,15);sharedWidth=width;sharedHeight=height;sharingScreen=true;cameraEnabled=false;announceMode();changedVideo()
+        capturedRawWidth=0;capturedRawHeight=0;replaceInput(screen,true,width,height,15);sharedWidth=width;sharedHeight=height;sharingScreen=true;cameraEnabled=false;announceMode();changedVideo()
     }
     internal fun resizeScreen(width:Int,height:Int){
         if(!sharingScreen||released)return
@@ -270,7 +284,7 @@ class RtcEngine(private val context: Context,private val sendSignal:(JSONObject)
         runCatching{old?.stopCapture()};runCatching{old?.dispose()};localVideo?.dispose();videoSource?.dispose();texture?.dispose()
         localVideo=null;videoSource=null;texture=null
     }
-    private fun changedVideo(){if(Hub.rtc===this)Hub.emit(JSONObject().put("event","call.video"))}
+    private fun changedVideo(){assist.sharingChanged();if(Hub.rtc===this)Hub.emit(JSONObject().put("event","call.video"))}
     private fun announceMode(){
         val channel=modes?:return
         if(released||channel.state()!=DataChannel.State.OPEN||channel.bufferedAmount()>4096)return
@@ -308,7 +322,8 @@ class RtcEngine(private val context: Context,private val sendSignal:(JSONObject)
         if (released) return
         released = true;mediaConnected=false;statsTask?.let { Hub.main.removeCallbacks(it) };restartTask?.let{Hub.main.removeCallbacks(it)};restartTask=null;signals.clear();candidates.clear()
         Hub.main.removeCallbacks(modeTask);pendingMode.set(null);modeQueued.set(false)
-        ScreenSharing.engineReleased(this);attach(null,null);sharingScreen=false;cameraEnabled=false
+        assist.close();ScreenSharing.engineReleased(this);attach(null,null);sharingScreen=false;cameraEnabled=false
+        remoteVideo?.removeSink(frameInfo)
         modes?.unregisterObserver();modes?.close();modes?.dispose();modes=null
         disposeInput();pc?.close();pc?.dispose();pc=null;videoSender=null
         audioTrack?.dispose();audioSource?.dispose();factory?.dispose();egl.release()

@@ -8,8 +8,8 @@ android {
         applicationId = "cn.qingliao.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 34
-        versionName = "2.14.0"
+        versionCode = 35
+        versionName = "2.15.0"
         testInstrumentationRunner = "cn.qingliao.app.CryptoInstrumentation"
         buildConfigField("boolean", "FORCE_RELAY", (project.findProperty("forceRelay") == "true").toString())
         ndk { abiFilters += if (project.findProperty("phoneBuild") == "true") listOf("arm64-v8a", "armeabi-v7a") else listOf("arm64-v8a", "armeabi-v7a", "x86_64") }

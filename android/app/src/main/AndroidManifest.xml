@@ -39,6 +39,10 @@
         <activity android:name=".AvatarCropActivity" android:exported="false" />
         <service android:name=".ChatService" android:exported="false" android:foregroundServiceType="remoteMessaging|microphone|camera" />
         <service android:name=".ScreenShareService" android:exported="false" android:foregroundServiceType="mediaProjection|microphone" />
+        <service android:name=".AssistAccessibilityService" android:label="@string/remote_assistance_label" android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE" android:exported="true">
+            <intent-filter><action android:name="android.accessibilityservice.AccessibilityService" /></intent-filter>
+            <meta-data android:name="android.accessibilityservice" android:resource="@xml/remote_assistance_service" />
+        </service>
         <provider android:name="androidx.core.content.FileProvider" android:authorities="cn.qingliao.app.files" android:exported="false" android:grantUriPermissions="true">
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" />
         </provider>
