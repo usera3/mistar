@@ -52,7 +52,8 @@ object Outbox {
         try {
             if(Hub.token!=session||Hub.me.optString("id")!=owner||!online())return null
             if(p.optBoolean("local_unreadable")){LocalData.state(owner,client,"blocked",attempts,0,"本机记录无法读取，请删除后重新输入");notify(owner,session,peer);return null}
-            if(p.optJSONObject("location")?.let{System.currentTimeMillis()-it.optLong("at")>15*60000L}==true||System.currentTimeMillis()-p.optLong("local_created")>7*86400000L){LocalData.state(owner,client,"blocked",attempts,0,"消息等待时间较长，请确认后重试");notify(owner,session,peer);return null}
+            if(p.has("location")&&System.currentTimeMillis()-p.optLong("local_created")>15*60000L){LocalData.state(owner,client,"blocked",attempts,0,"待发位置已过期，请重新定位后发送");notify(owner,session,peer);return null}
+            if(System.currentTimeMillis()-p.optLong("local_created")>7*86400000L){LocalData.state(owner,client,"blocked",attempts,0,"消息等待时间较长，请确认后重试");notify(owner,session,peer);return null}
             if(attempts>=5){LocalData.state(owner,client,"blocked",attempts,0,"暂时未能发送，请确认后重试");notify(owner,session,peer);return null}
             if(LocalData.outgoing(owner,client)==null)return null
             val uncertain=attempts>0;attempts++

@@ -24,7 +24,7 @@ class LocationSource(private val context:Context,private val changed:(Location)-
             if(providers.isEmpty()){stop();problem("系统定位未开启或设备没有可用定位服务");return}
             val cached=providers.mapNotNull{runCatching{manager.getLastKnownLocation(it)}.getOrNull()}.filter{fresh(it)}.minByOrNull{it.accuracy}
             cached?.let{changed(Location(it))}
-            for(provider in providers)manager.requestLocationUpdates(provider,3000L,3f,this,Looper.getMainLooper())
+            for(provider in providers)manager.requestLocationUpdates(provider,3000L,0f,this,Looper.getMainLooper())
             timeout=Runnable{if(active)problem("暂未取得新的位置，请到开阔处重试")}.also{handler.postDelayed(it,30000)}
         }catch(_:SecurityException){stop();problem("定位权限已被撤销，请重新允许")}
         catch(_:Exception){stop();problem("定位服务暂不可用，请重试")}

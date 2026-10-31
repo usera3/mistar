@@ -22,7 +22,8 @@ import java.util.concurrent.CopyOnWriteArrayList
 object LocationTests {
     fun run(i:Instrumentation,variant:String):String {
         check(Build.FINGERPRINT.contains("generic")||Build.MODEL.contains("sdk")){"Owned emulator only"}
-        val folder=File(i.targetContext.getExternalFilesDir(null),"location-test").apply{mkdirs()};val oldHttp=Hub.http;val oldUpdates=AppUpdates.transport
+        val realTiles=variant.endsWith("-maps-live")
+        val folder=File(i.targetContext.getExternalFilesDir(null),if(realTiles)"location-map-smoke"else"location-test").apply{mkdirs()};val oldHttp=Hub.http;val oldUpdates=AppUpdates.transport;val oldMaps=MapTiles.client
         val owner="89190001";val bob="89190002";val session="synthetic-location-session";val pub=mutableMapOf<String,JSONObject>();val messages=CopyOnWriteArrayList<JSONObject>();val updates=CopyOnWriteArrayList<JSONObject>();val methods=CopyOnWriteArrayList<String>()
         var share:JSONObject?=null;var deleted=0;var checks=0;var activity:Activity?=null
         val manager=i.targetContext.getSystemService(LocationManager::class.java);var mocked=false
@@ -41,8 +42,15 @@ object LocationTests {
         fun mock(lat:Double=35.6895){manager.setTestProviderLocation(LocationManager.GPS_PROVIDER,point(lat))}
         fun launch(extra:Intent=Intent()):Activity {val intent=Intent(i.targetContext,LocationActivity::class.java).putExtra("peer",bob).putExtras(extra).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);return (i.startActivitySync(intent) as Activity).also{activity=it}}
         fun reject(f:()->Unit){check(runCatching{f()}.isFailure);checks++}
+        fun mapState(a:Activity):JSONObject? {
+            var result:JSONObject?=null;val latch=java.util.concurrent.CountDownLatch(1)
+            ui{val map=field(a,"map") as LocationMapView;map.web.evaluateJavascript("JSON.stringify(window.mapState||{})"){raw->result=runCatching{JSONObject(JSONTokener(raw).nextValue() as String)}.getOrNull();latch.countDown()}}
+            latch.await(3,java.util.concurrent.TimeUnit.SECONDS);return result
+        }
+        fun awaitMap(a:Activity,latitude:Double){val end=SystemClock.elapsedRealtime()+45000;while(true){val state=mapState(a);if(state?.optInt("tilesLoaded",0)?:0>0&&state?.optDouble("lat")==latitude&&state.optBoolean("loading")==false&&state.optInt("errors")==0)return;check(SystemClock.elapsedRealtime()<end){"Map render timeout: $state ${(field(a,"map") as LocationMapView).tileFailure}"};Thread.sleep(100)}}
         try{
             com.google.crypto.tink.hybrid.HybridConfig.register();com.google.crypto.tink.signature.SignatureConfig.register()
+            if(!realTiles)MapTiles.client=MapTileFixture.client()
             val e=KeysetHandle.generateNew(KeyTemplates.get("DHKEM_X25519_HKDF_SHA256_HKDF_SHA256_AES_256_GCM"));val sig=KeysetHandle.generateNew(KeyTemplates.get("ECDSA_P256"));val ep=public(e);val sp=public(sig);pub[bob]=JSONObject().put("enc",ep).put("sig",sp).put("key_id",hash((ep+"\n"+sp).toByteArray()))
             ui{Hub.token=session;Hub.me=JSONObject().put("id",owner).put("nickname","合成位置用户");Hub.connected=false;ChatCrypto.clear();LocationSessions.clear()
                 Hub.http=OkHttpClient.Builder().addInterceptor{chain->
@@ -68,6 +76,7 @@ object LocationTests {
             reject{PayloadRules.validate(JSONObject().put("type","text").put("text","tampered").put("location",value),"")}
             check(LocationMaps.web(value).getQueryParameter("coord_type")=="wgs84"&&LocationMaps.web(value).scheme=="https");checks++
             check(LocationMaps.amap(value).getQueryParameter("dev")=="1"&&LocationMaps.baidu(value).getQueryParameter("coord_type")=="wgs84");checks++
+            for(url in listOf("http://tile.openstreetmap.org/0/0/0.png","https://evil.test/0/0/0.png","file:///sdcard/private","https://api.claudcode.xyz/xingyu/map-tiles/0/9999/0.png","https://api.claudcode.xyz/xingyu/map-tiles/15/1/1.png?token=anything","https://api.claudcode.xyz/api/me")){check(MapTiles.parse(android.net.Uri.parse(url))==null)};checks++
             val wire=ChatCrypto.outgoing(LocationPayload.packet(value,bob));check(!wire.toString().contains("35.6895"));checks++
             val encrypted=JSONObject().put("id",UUID.randomUUID().toString()).put("client_id",wire.getString("client_id")).put("sender",owner).put("recipient",bob).put("created",System.currentTimeMillis()).put("type","encrypted").put("envelope",wire.getJSONObject("envelope"))
             val decoded=ChatCrypto.incoming(JSONObject(encrypted.toString()).put("location",JSONObject(value.toString()).put("lat",10)));check(decoded.getJSONObject("location").getDouble("lat")==35.6895);checks++
@@ -89,19 +98,26 @@ object LocationTests {
             check(i.targetContext.checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION)==android.content.pm.PackageManager.PERMISSION_GRANTED);checks++
             shell("appops set cn.qingliao.app android:mock_location allow");shell("settings put secure location_mode 3")
             manager.addTestProvider(LocationManager.GPS_PROVIDER,false,false,false,false,true,true,true,Criteria.POWER_LOW,Criteria.ACCURACY_FINE);mocked=true;manager.setTestProviderEnabled(LocationManager.GPS_PROVIDER,true);ui{find(picker,"location.refresh")!!.performClick()};mock()
-            await("real provider preview"){find(picker,"location.send")?.isEnabled==true&&visible(find(picker,"location.send"))};check(messages.isEmpty());checks++;capture("location-preview")
+            await("real provider preview"){find(picker,"location.send")?.isEnabled==true&&visible(find(picker,"location.send"))};check(messages.isEmpty());checks++;awaitMap(picker,35.6895);checks++;capture("location-preview")
+            ui{(find(picker,"location.label") as EditText).setText("bad\u202elabel");find(picker,"location.send")!!.performClick()};check(messages.isEmpty()&&!picker.isFinishing);checks++;ui{(find(picker,"location.label") as EditText).setText("")}
             ui{find(picker,"location.send")!!.performClick()};await("one-shot encrypted card sent"){messages.size==1&&picker.isFinishing};activity=null;check(!messages.last().toString().contains("139.6917"));checks++
-            val view=launch(Intent().putExtra("location",value.toString()));await("read-only viewer"){find(view,"location.coordinates")?.let{(it as TextView).text.toString().contains("35.689500")}==true};check(field(view,"source")==null);checks++;capture("location-detail");ui{view.finish()};activity=null
+            val view=launch(Intent().putExtra("location",value.toString()));await("read-only viewer"){find(view,"location.coordinates")?.let{(it as TextView).text.toString().contains("35.689500")}==true};check(field(view,"source")==null);checks++;awaitMap(view,35.6895);val viewerMap=field(view,"map") as LocationMapView;ui{check(!viewerMap.web.settings.allowFileAccess&&!viewerMap.web.settings.allowContentAccess&&!viewerMap.web.settings.domStorageEnabled)};checks++;capture("location-detail")
+            var cardDialog:AlertDialog?=null;var thumb:LocationThumbnail?=null;val previousForeground=Hub.foreground
+            ui{Hub.foreground=true;val card=LocationCardView(view,ThemeStore.current(view),value,false,(220*view.resources.displayMetrics.density).toInt()){};thumb=field(card,"map") as LocationThumbnail;cardDialog=AlertDialog.Builder(view).setView(card).create().also{it.show()};card.update()}
+            await("native message thumbnail has raster tiles"){thumb!!.update();field(thumb!!,"bitmap")!=null};checks++;capture("location-message-map");ui{cardDialog!!.dismiss();Hub.foreground=previousForeground;view.finish()};activity=null
             val livePicker=launch();mock();await("live picker ready"){find(livePicker,"location.start")?.isEnabled==true&&visible(find(livePicker,"location.start"))};ui{find(livePicker,"location.start")!!.performClick()}
             await("foreground sharing notification"){LocationShareService.instance!=null&&i.targetContext.getSystemService(NotificationManager::class.java).activeNotifications.any{it.id==LocationShareService.NOTIFICATION}};activity=null;checks++
             mock();await("first signed live packet"){updates.isNotEmpty()};check(messages.size==2&&updates.all{!it.toString().contains("139.6917")});checks++
+            val stationaryAt=(field(LocationShareService.instance!!,"fix") as Location).time;Thread.sleep(3300);mock();await("stationary GPS keeps fresh timestamps"){(field(LocationShareService.instance!!,"fix") as Location).time>stationaryAt};checks++
             shell("input keyevent KEYCODE_HOME");Thread.sleep(3300);mock(35.6905);await("OS delivers new GPS fix"){(LocationShareService.instance?.let{field(it,"fix")} as? Location)?.latitude==35.6905};await("live update while at system home"){updates.size>=2};check(LocationShareService.instance!=null&&messages.size==2);checks++
             val notification=i.targetContext.getSystemService(NotificationManager::class.java).activeNotifications.first{it.id==LocationShareService.NOTIFICATION}.notification
             val monitor=i.addMonitor(LocationActivity::class.java.name,null,false);notification.contentIntent.send();val liveView=i.waitForMonitorWithTimeout(monitor,15000)?:error("Live notification viewer missing");i.removeMonitor(monitor);activity=liveView
-            await("latest verified live coordinate"){find(liveView,"location.coordinates")?.let{(it as TextView).text.toString().contains("35.690500")}==true};check(field(liveView,"source")==null);checks++;capture("live-location")
+            await("latest verified live coordinate"){find(liveView,"location.coordinates")?.let{(it as TextView).text.toString().contains("35.690500")}==true};check(field(liveView,"source")==null);checks++;awaitMap(liveView,35.6905);checks++;capture("live-location")
+            Thread.sleep(3300);mock(35.6915);await("visible live map receives next encrypted fix"){find(liveView,"location.coordinates")?.let{(it as TextView).text.toString().contains("35.691500")}==true};awaitMap(liveView,35.6915);checks++;capture("live-location-moved")
             notification.actions.last().actionIntent.send();await("notification stops GPS and sharing"){LocationShareService.instance==null&&deleted>0};check(LocationSessions.isEnded(share!!.getString("id")));checks++
             val total=updates.size;mock(35.6915);Thread.sleep(1200);check(updates.size==total&&i.targetContext.getSystemService(NotificationManager::class.java).activeNotifications.none{it.id==LocationShareService.NOTIFICATION});checks++;capture("location-stopped")
-            File(folder,"result.json").writeText(JSONObject().put("passed",true).put("checks",checks).put("api",Build.VERSION.SDK_INT).put("apkSha256",hash(File(i.targetContext.applicationInfo.sourceDir).readBytes())).put("realSystemGpsProvider",true).put("actualPermissionDialog",true).put("realTinkPrivateAndLive",true).put("foregroundNotificationStop",true).put("updatesAtHome",true).put("viewerNoGps",true).put("realRequests",0).put("physicalDevices",false).toString(2))
+            val oldPoint=JSONObject(value.toString()).put("at",System.currentTimeMillis()-86400000L);val forwarded=Outbox.send(LocationPayload.packet(oldPoint,bob),session,owner);check(!forwarded.optBoolean("pending")&&forwarded.getJSONObject("location").getLong("at")==oldPoint.getLong("at"));checks++
+            File(folder,"result.json").writeText(JSONObject().put("passed",true).put("checks",checks).put("api",Build.VERSION.SDK_INT).put("apkSha256",hash(File(i.targetContext.applicationInfo.sourceDir).readBytes())).put("realSystemGpsProvider",true).put("actualPermissionDialog",true).put("realTinkPrivateAndLive",true).put("foregroundNotificationStop",true).put("updatesAtHome",true).put("viewerNoGps",true).put("inAppMapTilesRendered",true).put("liveMapMarkerUpdated",true).put("nativeThumbnailRendered",true).put("oldSnapshotForwarded",true).put("realMapProvider",realTiles).put("realRequests",0).put("physicalDevices",false).toString(2))
             return "PASS native location crypto/system GPS/picker/live foreground/stop: $checks checks"
         }catch(e:Throwable){runCatching{capture("failure")};File(folder,"failure.txt").writeText(e.stackTraceToString());throw e}
         finally{
@@ -109,7 +125,8 @@ object LocationTests {
             if(mocked)runCatching{manager.removeTestProvider(LocationManager.GPS_PROVIDER)}
             if(oldMode=="null")shell("settings delete secure location_mode")else shell("settings put secure location_mode $oldMode")
             shell("appops set cn.qingliao.app android:mock_location default")
-            ui{Hub.token="";Hub.me=JSONObject();ChatCrypto.clear();Hub.http=oldHttp;AppUpdates.transport=oldUpdates}
+            MapTiles.client.dispatcher.cancelAll();MapTiles.client=oldMaps
+            ui{Hub.token="";Hub.me=JSONObject();Hub.foreground=false;ChatCrypto.clear();Hub.http=oldHttp;AppUpdates.transport=oldUpdates}
         }
     }
 }

@@ -26,6 +26,7 @@ Android 和 `bot-examples/server_ca.crt` 内的证书是现有公开服务的**�
 
 - Android `Hub.SERVER`：`android/app/src/main/java/cn/qingliao/app/QingApp.kt`。
 - Android `android/app/src/main/assets/server_ca.crt`：替换为自己的公开信任证书。
+- 内置地图：同步修改`MapTiles.kt`、`assets/location-map/index.html`中的缓存域名、来源校验和CSP；瓦片缓存模板及许可见 [THIRD_PARTY.md](THIRD_PARTY.md)。不要让自部署客户端误把地图区域发往原运营者的缓存节点。
 - Python 示例 `bot-examples/bot_api.py`：默认 API 源，以及同目录 `server_ca.crt`。
 - `backend/server.py` 的 `PUBLIC_IP` 通过环境提供；nginx、TURN 使用自己的地址与证书。
 

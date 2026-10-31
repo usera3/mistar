@@ -5,3 +5,7 @@
 *.mp4 binary
 *.m4a binary
 *.wav binary
+# Preserve upstream bytes used by the published Leaflet SRI checks.
+android/app/src/main/assets/location-map/leaflet.js -text whitespace=cr-at-eol
+android/app/src/main/assets/location-map/leaflet.css -text whitespace=cr-at-eol
+android/app/src/main/assets/location-map/LICENSE -text whitespace=cr-at-eol

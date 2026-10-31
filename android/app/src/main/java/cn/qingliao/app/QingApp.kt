@@ -142,6 +142,7 @@ object Hub {
         runCatching{ConversationState.flush(me.optString("id"),old)}
         ConversationState.clearMemory()
         LocationShareService.instance?.end();LocationSessions.clear()
+        val mapCacheClient=MapTiles.client;mapCacheClient.dispatcher.cancelAll();io.execute{runCatching{mapCacheClient.cache?.evictAll()}}
         GroupDirectory.clear()
         val privateScreens=activities.keys.filter{it !is MainActivity}.toList()
         val mainScreens=activities.keys.filterIsInstance<MainActivity>().toList()

@@ -25,6 +25,7 @@ class LocationActivity:Activity(){
     private var busy=false;@Volatile private var resumed=false;@Volatile private var revision=0;private var duration=3600;private var permissionAsked=false;private var liveChecked=false;private var liveUnavailable=false
     private lateinit var content:LinearLayout;private lateinit var state:TextView;private lateinit var title:TextView;private lateinit var coordinates:TextView;private lateinit var precision:TextView;private lateinit var time:TextView
     private var send:TextView?=null;private var shareButton:TextView?=null;private var stop:TextView?=null;private var label:EditText?=null
+    private var map:LocationMapView?=null
     private val changed:()->Unit={if(valid())renderLive()}
     private val tick=object:Runnable{override fun run(){if(resumed&&valid()){if(viewing)renderLive();else renderPoint();Hub.main.postDelayed(this,1000)}}}
     private fun valid()=session.isNotEmpty()&&Hub.token==session&&Hub.me.optString("id")==owner&&!isFinishing&&!isDestroyed
@@ -37,7 +38,7 @@ class LocationActivity:Activity(){
         root.setOnApplyWindowInsetsListener{v,i->if(Build.VERSION.SDK_INT>=30){val b=i.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.ime());v.setPadding(b.left,b.top,b.right,b.bottom)}else v.setPadding(i.systemWindowInsetLeft,i.systemWindowInsetTop,i.systemWindowInsetRight,i.systemWindowInsetBottom);i}
         val header=u.row();header.addView(u.icon("back","返回"){finish()},u.lp(48,48));header.addView(u.text(if(viewing)if(live.isEmpty())"位置详情"else"实时位置"else"分享位置",18f,bold=true),LinearLayout.LayoutParams(0,-2,1f));root.addView(header,u.lp())
         content=u.col().apply{val pad=u.dp(if(u.tiny)10 else 20);setPadding(pad,u.dp(8),pad,u.dp(16))};root.addView(ScrollView(this).apply{addView(content)},LinearLayout.LayoutParams(-1,0,1f))
-        val card=u.card();val mark=FrameLayout(this).apply{background=BrandUi.rounded(this@LocationActivity,p.soft,18);addView(Glyph(this@LocationActivity,"location",p.accent),FrameLayout.LayoutParams(u.dp(if(u.tiny)34 else 50),u.dp(if(u.tiny)40 else 58),Gravity.CENTER));contentDescription="位置标记"};card.addView(mark,u.lp(-1,if(u.tiny)60 else 120));u.gap(card,14)
+        val card=u.card();map=LocationMapView(this,p);card.addView(map,u.lp(-1,if(u.tiny)150 else 260));u.gap(card,14)
         title=u.text("正在定位…",if(u.tiny)17f else 21f,bold=true).apply{tag="location.title"};coordinates=u.text("",14f,p.ink).apply{tag="location.coordinates"};precision=u.text("",12f,p.muted).apply{tag="location.precision"};time=u.text("",11f,p.muted).apply{tag="location.time"}
         for(view in listOf(title,coordinates,precision,time)){card.addView(view,u.lp());u.gap(card,8)};content.addView(card,u.lp())
         state=u.text("",12f,p.accent).apply{tag="location.state";accessibilityLiveRegion=View.ACCESSIBILITY_LIVE_REGION_POLITE};u.gap(content,12);content.addView(state,u.lp())
@@ -46,20 +47,20 @@ class LocationActivity:Activity(){
             content.addView(u.link("重新定位","location.refresh"){locate(true)},u.lp());content.addView(u.link("系统定位设置","location.settings"){startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))},u.lp())
             content.addView(u.link("共享通知设置","location.notifications"){startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE,packageName))},u.lp())
             val spinner=Spinner(this).apply{tag="location.duration";adapter=ArrayAdapter(this@LocationActivity,android.R.layout.simple_spinner_dropdown_item,listOf("共享15分钟","共享1小时","共享8小时"));setSelection(1);onItemSelectedListener=object:AdapterView.OnItemSelectedListener{override fun onNothingSelected(parent:AdapterView<*>?){};override fun onItemSelected(parent:AdapterView<*>?,view:View?,position:Int,id:Long){duration=listOf(900,3600,28800)[position]}}};content.addView(spinner,u.lp(-1,48))
-            content.addView(u.text("发送前可预览；实时共享会持续显示通知，可随时停止。",11f,p.muted),u.lp())
+            content.addView(u.text("发送前可预览；实时共享可随时停止。底图由OpenStreetMap提供，会请求当前查看的地图区域。",11f,p.muted),u.lp())
             val footer=u.row().apply{setPadding(u.dp(8),u.dp(4),u.dp(8),u.dp(6))};send=u.button("发送位置","location.send"){send(false)};shareButton=u.button("实时共享","location.start",false){send(true)}
             footer.addView(send,LinearLayout.LayoutParams(0,-2,1f).apply{marginEnd=u.dp(4)});footer.addView(shareButton,LinearLayout.LayoutParams(0,-2,1f));root.addView(footer,u.lp())
         }else{
-            content.addView(u.button("在地图中打开","location.map"){point?.let{LocationMaps.open(this,it)}},u.lp());u.gap(content,8)
+            content.addView(u.button("使用其他地图","location.map",false){point?.let{LocationMaps.open(this,it)}},u.lp());u.gap(content,8)
             content.addView(u.button("网页地图","location.web",false){point?.let{LocationMaps.browser(this,it)}},u.lp());u.gap(content,8)
             if(live.isNotEmpty()){stop=u.button("停止我的共享","location.stop",false){stopShare()}.apply{visibility=View.GONE};content.addView(stop,u.lp());content.addView(u.link("重新连接","location.reconnect"){refreshLive()},u.lp());content.addView(u.text("分享自己的位置需从聊天中主动开启。点开地图会将此坐标交给所选地图服务。",11f,p.muted),u.lp())}
             else content.addView(u.text("这是发送时的位置快照，之后移动不会自动更新。点开地图会将此坐标交给所选地图服务。",11f,p.muted),u.lp())
         }
         setContentView(root);root.requestApplyInsets();renderPoint()
     }
-    override fun onResume(){super.onResume();resumed=true;if(!valid()){finish();return};LocationSessions.listeners.add(changed);Hub.main.post(tick);if(viewing){if(live.isNotEmpty())refreshLive()}else locate()}
-    override fun onPause(){resumed=false;revision++;source?.stop();source=null;fix=null;Hub.main.removeCallbacks(tick);LocationSessions.listeners.remove(changed);super.onPause()}
-    override fun onDestroy(){source?.stop();Hub.main.removeCallbacks(tick);LocationSessions.listeners.remove(changed);super.onDestroy()}
+    override fun onResume(){super.onResume();resumed=true;if(!valid()){finish();return};map?.resume();LocationSessions.listeners.add(changed);Hub.main.post(tick);if(viewing){if(live.isNotEmpty())refreshLive()}else locate()}
+    override fun onPause(){resumed=false;revision++;map?.pause();source?.stop();source=null;fix=null;Hub.main.removeCallbacks(tick);LocationSessions.listeners.remove(changed);super.onPause()}
+    override fun onDestroy(){map?.dispose();source?.stop();Hub.main.removeCallbacks(tick);LocationSessions.listeners.remove(changed);super.onDestroy()}
     private fun locate(askAgain:Boolean=false){
         if(!valid()||!resumed||viewing||busy)return
         source?.stop();source=null;fix=null;point=null;renderPoint()
@@ -79,6 +80,7 @@ class LocationActivity:Activity(){
         val value=point;title.text=value?.optString("label")?:if(viewing)"暂未取得共享位置"else"等待定位"
         coordinates.text=value?.let{LocationPayload.coordinates(it)}.orEmpty();precision.text=value?.let{LocationPayload.accuracy(it)}.orEmpty()
         time.text=value?.let{"采集于 "+SimpleDateFormat("MM-dd HH:mm:ss",Locale.CHINA).format(Date(it.getLong("at")))}.orEmpty()
+        value?.let{map?.setPoint(it)};map?.syncVisible()
         val available=!busy&&fix?.let{source?.fresh(it)==true&&source?.permitted()==true}==true
         send?.apply{isEnabled=available;alpha=if(available)1f else .45f};shareButton?.apply{isEnabled=available;alpha=if(available)1f else .45f}
     }
@@ -98,7 +100,7 @@ class LocationActivity:Activity(){
         val latest=fix?:return;val locSource=source?:return
         if(!locSource.fresh(latest)||!locSource.permitted()){state.text="当前位置已过期，请重新定位";return}
         if(realtime&&LocationShareService.instance!=null){val service=LocationShareService.instance!!;startActivity(Intent(this,LocationActivity::class.java).putExtra("peer",service.peer).putExtra("live",service.shareId));return}
-        val value=LocationPayload.from(latest,locSource.approximate,label?.text?.toString().orEmpty().ifBlank{"我的位置"});val opening=revision
+        val value=runCatching{LocationPayload.from(latest,locSource.approximate,label?.text?.toString().orEmpty().ifBlank{"我的位置"})}.getOrElse{label?.error="位置名称含有不支持的字符";state.text="请修改位置名称后发送";return};val opening=revision
         task({
             check(valid()&&resumed&&revision==opening)
             var share:JSONObject?=null
