@@ -27,7 +27,7 @@ object AuthDeveloperTests {
         var bots=JSONArray();var verifyFailure=true;var checks=0
         val ownerSession="synthetic-developer-session"
         val token="qlb_synthetic_native_test_only";val secret="synthetic_webhook_test_only"
-        fun ui(f:()->Unit)=i.runOnMainSync(f)
+        fun ui(f:()->Unit){var failure:Throwable?=null;i.runOnMainSync{try{f()}catch(e:Throwable){failure=e}};failure?.let{throw it}}
         fun walk(v:View):List<View> = listOf(v)+if(v is ViewGroup)(0 until v.childCount).flatMap{walk(v.getChildAt(it))}else emptyList()
         fun await(timeout:Long=12000,p:()->Boolean){val end=SystemClock.elapsedRealtime()+timeout;while(true){var ok=false;ui{ok=p()};if(ok){i.waitForIdleSync();return};check(SystemClock.elapsedRealtime()<end){"Native auth/developer condition timed out"};Thread.sleep(35)}}
         fun screen(name:String){i.waitForIdleSync();Thread.sleep(4500);val b=i.uiAutomation.takeScreenshot();File(folder,"$name.png").outputStream().use{b.compress(Bitmap.CompressFormat.PNG,100,it)};b.recycle()}

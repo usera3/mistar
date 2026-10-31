@@ -70,7 +70,7 @@ class Security:
     def send_mail(self, email, code, purpose):
         host = os.environ.get('SMTP_HOST', 'smtp.qq.com')
         user, password = os.environ.get('SMTP_USER', ''), os.environ.get('SMTP_PASSWORD', '')
-        labels = {'register': '注册账号', 'reset': '重置密码', 'bind': '绑定邮箱', 'identity_restart':'重新开始加密聊天'}
+        labels = {'register': '注册账号', 'reset': '重置密码', 'login': '登录账号', 'bind': '绑定邮箱', 'identity_restart':'重新开始加密聊天'}
         msg = EmailMessage()
         msg['From'] = '弥星 <' + user + '>'
         msg['To'] = email
@@ -100,7 +100,7 @@ class Security:
         if len(self.tasks) >= 8: self.reject('邮件服务繁忙，请稍后重试', 429)
         p = await request.json()
         purpose = p.get('purpose')
-        if purpose not in ('register', 'reset', 'bind', 'identity_restart'): self.reject('验证码用途不正确')
+        if purpose not in ('register', 'reset', 'login', 'bind', 'identity_restart'): self.reject('验证码用途不正确')
         if purpose=='register':self.c['guard'].registration(request)
         email = self.email(p.get('email', ''))
         self.c['limited']('mail-address:' + self.c['guard'].email_key(email), 10, 86400)
@@ -119,9 +119,10 @@ class Security:
             if not await self.password_matches(u, p.get('password', '')): self.reject('当前密码不正确', 403)
             self.c['auth'](request.headers.get('Authorization', '').removeprefix('Bearer '))
             valid = not self.c['guard'].email_taken(email)
-        elif purpose == 'reset':
+        elif purpose in ('reset', 'login'):
             # Verified email is unique. Client-supplied usernames never select the reset target.
             u = self.c['row']('SELECT id FROM users WHERE email=?', (email,))
+            if purpose == 'login' and u and self.c['bots'].get(u['id']): u = None
             uid = u['id'] if u else ''
             valid = bool(u)
         else:
@@ -149,6 +150,18 @@ class Security:
         async with self.c['password_slots']:
             value = await asyncio.to_thread(hashlib.scrypt, password.encode(), salt=bytes.fromhex(u['salt']), n=16384, r=8, p=5 if u.get('password_kdf') == 2 else 1)
         return hmac.compare_digest(value.hex(), u['password'])
+
+    async def login_code(self, request):
+        self.c['limited']('login-code-ip:' + request['client_ip'], 30, 300)
+        p = await request.json()
+        email = self.email(p.get('email', ''))
+        self.c['limited']('login-code-address:' + self.c['guard'].email_key(email), 20, 300)
+        u = self.c['row']('SELECT id FROM users WHERE email=?', (email,))
+        uid = u['id'] if u and not self.c['bots'].get(u['id']) else ''
+        vid = self.verify(p, 'login', email, uid)
+        if not uid: self.reject('验证码无效或已过期，请重新获取')
+        self.c['moderation'].ensure_account(uid)
+        return web.json_response(self.c['new_session'](uid, verification_id=vid))
 
     async def reset(self, request):
         self.c['limited']('reset-ip:' + request['client_ip'], 20, 3600)
@@ -268,7 +281,7 @@ class Security:
     def routes(self, app):
         app.on_shutdown.append(self.cleanup)
         app.add_routes([
-            web.post('/api/auth/code', self.code), web.post('/api/password/reset', self.reset),
+            web.post('/api/auth/code', self.code), web.post('/api/login/code', self.login_code), web.post('/api/password/reset', self.reset),
             web.post('/api/password/change', self.change), web.post('/api/email/bind', self.bind),
             web.get('/api/account', self.account), web.post('/api/crypto/identity', self.identity),
             web.get('/api/crypto/identity/{uid}', self.identity),

@@ -39,7 +39,7 @@ internal class AuthScreen(private val activity:Activity,private val p:ThemePalet
     private fun go(next:String){
         if(busy||!valid())return
         val resetFlow=page.startsWith("reset");val nextReset=next.startsWith("reset")
-        if(resetFlow!=nextReset||next=="login"){
+        if(resetFlow!=nextReset||next=="login"||next=="login.code"){
             verification="";verifiedEmail="";code="";confirm=""
             if(resetFlow)password=""
         }
@@ -54,13 +54,15 @@ internal class AuthScreen(private val activity:Activity,private val p:ThemePalet
         outer.addView(form,LinearLayout.LayoutParams(if(width>520)u.dp(440)else -1,-2))
         scroll.addView(outer);view.removeAllViews();view.addView(scroll,FrameLayout.LayoutParams(-1,-1))
         val header=u.row()
-        if(page!="login")header.addView(u.icon("back","返回上一步"){back()}.apply{tag="auth.back"},u.lp(48,48))
+        if(page!="login"&&page!="login.code")header.addView(u.icon("back","返回上一步"){back()}.apply{tag="auth.back"},u.lp(48,48))
         else header.addView(ImageView(activity).apply{setImageResource(R.drawable.ic_launcher);contentDescription="弥星标志";background=BrandUi.rounded(activity,p.surface,12);clipToOutline=true},u.lp(if(u.tiny)28 else if(u.compact)38 else 46,if(u.tiny)28 else if(u.compact)38 else 46))
         header.addView(u.text("MISTAR",11f,p.accent,true).apply{letterSpacing=.16f;setPadding(u.dp(10),0,0,0)},LinearLayout.LayoutParams(0,-2,1f))
-        form.addView(header,u.lp());u.gap(form,if(u.tiny)8 else if(u.compact)12 else 32)
-        val title=when(page){"login"->if(u.tiny)"欢迎回到弥星"else"相伴，从这里开始";"register"->if(u.tiny)"创建弥星账号"else"认识一下，新朋友";"register.email"->"验证你的邮箱";"reset"->"找回你的账号";else->"设置新密码"}
-        val subtitle=when(page){"login"->"登录弥星，继续和在意的人聊天。";"register"->"先设置你的昵称、账号和密码。";"register.email"->"最后一步，用邮箱保护你的账号。";"reset"->"填写绑定邮箱即可找回，无需记住账号。";else->"重置后，所有设备都需要重新登录。"}
-        form.addView(u.text(title,if(u.tiny)18f else if(u.compact)23f else 28f,bold=true),u.lp());u.gap(form,if(u.tiny)12 else 8)
+        if(page=="login")header.addView(u.link("验证码登录","auth.loginByCode"){capture?.invoke();if(emailValid(username.trim()))email=username.trim().lowercase(java.util.Locale.ROOT);password="";go("login.code")}.apply{setPadding(u.dp(6),u.dp(6),u.dp(6),u.dp(6))},u.lp(-2,if(u.compact)40 else 48))
+        if(page=="login.code")header.addView(u.link("密码登录","auth.loginPassword"){capture?.invoke();go("login")}.apply{setPadding(u.dp(6),u.dp(6),u.dp(6),u.dp(6))},u.lp(-2,if(u.compact)40 else 48))
+        form.addView(header,u.lp());u.gap(form,if(u.tiny)6 else if(u.compact)12 else 32)
+        val title=when(page){"login"->if(u.tiny)"欢迎回到弥星"else"相伴，从这里开始";"login.code"->"邮箱验证码登录";"register"->if(u.tiny)"创建弥星账号"else"认识一下，新朋友";"register.email"->"验证你的邮箱";"reset"->"找回密码";else->"设置新密码"}
+        val subtitle=when(page){"login"->"登录弥星，继续和在意的人聊天。";"login.code"->"使用已绑定的邮箱，无需输入密码。";"register"->"先设置你的昵称、账号和密码。";"register.email"->"最后一步，用邮箱保护你的账号。";"reset"->"填写绑定邮箱即可找回，无需记住账号。";else->"重置后，所有设备都需要重新登录。"}
+        if(!u.tiny||page!="login"){form.addView(u.text(title,if(u.tiny)18f else if(u.compact)23f else 28f,bold=true),u.lp());u.gap(form,8)}
         if(!u.tiny){form.addView(u.text(subtitle,13f,p.muted),u.lp());u.gap(form,if(u.compact)16 else 26)}
         if(page.startsWith("register")||page.startsWith("reset")){
             val second=page.contains('.')
@@ -86,6 +88,32 @@ internal class AuthScreen(private val activity:Activity,private val p:ThemePalet
                 form.addView(u.button("登录弥星","auth.submit",click=submit),u.lp());pass.done(submit)
                 if(u.tiny)form.addView(forgot,u.lp())
                 u.gap(form,12);form.addView(u.link("还没有账号？  创建一个","auth.register"){capture?.invoke();password="";go("register")},u.lp())
+            }
+            "login.code"->{
+                val mail=field("邮箱","注册或绑定时验证的邮箱","auth.email",email,max=254,type=InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS)
+                mail.edit.setAutofillHints(View.AUTOFILL_HINT_EMAIL_ADDRESS)
+                val otp=field("验证码","6 位邮箱验证码","auth.code",code,max=6,type=InputType.TYPE_CLASS_NUMBER)
+                otp.edit.importantForAutofill=View.IMPORTANT_FOR_AUTOFILL_NO
+                capture={email=mail.value().trim().lowercase(java.util.Locale.ROOT);code=otp.value()}
+                codeButton=u.button("发送验证码","auth.sendCode",false){
+                    capture?.invoke();clearErrors()
+                    when{!emailValid(email)->mail.fail("请输入正确的邮箱地址");SystemClock.elapsedRealtime()<retryAt->Unit;else->{
+                        val address=email
+                        request("/api/auth/code",JSONObject().put("purpose","login").put("email",address),"正在发送验证码…"){
+                            verification=it.getString("verification_id");verifiedEmail=address;code="";otp.edit.text.clear()
+                            retryAt=SystemClock.elapsedRealtime()+it.optLong("retry_after",60).coerceIn(1,3600)*1000
+                            message(if(u.tiny)"邮箱匹配时会发送验证码。"else"邮箱匹配时会发送验证码，请检查邮箱及垃圾邮件。");updateCountdown()
+                        }
+                    }}
+                };form.addView(codeButton,u.lp());u.gap(form,if(u.tiny)4 else 12)
+                form.addView(status,u.lp());u.gap(form,if(u.tiny)4 else 10)
+                val submit={capture?.invoke();clearErrors();when{
+                    !emailValid(email)->mail.fail("请输入正确的邮箱地址")
+                    verification.isEmpty()||verifiedEmail!=email->mail.fail("请先为当前邮箱发送验证码")
+                    !code.matches(Regex("[0-9]{6}"))->otp.fail("请输入 6 位验证码")
+                    else->request("/api/login/code",JSONObject().put("email",email).put("verification_id",verification).put("code",code),"正在登录…"){signedIn(it)}
+                };Unit}
+                form.addView(u.button("验证并登录","auth.submit",click=submit),u.lp());otp.done(submit)
             }
             "register"->{
                 val nick=field("昵称","你希望大家怎么称呼你","auth.nickname",nickname,max=20)

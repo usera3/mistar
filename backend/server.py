@@ -230,7 +230,7 @@ async def errors(request, handler):
 
 @web.middleware
 async def authentication(request, handler):
-    if request.path.startswith('/api/') and request.path not in ('/api/register', '/api/login', '/api/health', '/api/app-release', '/api/auth/code', '/api/password/reset', '/api/payments/notify'):
+    if request.path.startswith('/api/') and request.path not in ('/api/register', '/api/login', '/api/login/code', '/api/health', '/api/app-release', '/api/auth/code', '/api/password/reset', '/api/payments/notify'):
         token=request.headers.get('Authorization', '').removeprefix('Bearer ')
         request['uid'] = bots.authorize(request,token) if token.startswith('qlb_') else auth(token)
         if request.path.startswith('/api/bot/') and not request.get('bot_token'): reject('请使用机器人专用凭证',403)
@@ -240,7 +240,7 @@ async def authentication(request, handler):
 def public_plaza_open(): return os.environ.get('QINGLIAO_PUBLIC_PLAZA', '0') == '1'
 
 
-async def health(request): return web.json_response({'ok': True, 'app': 'qingliao', 'version': '1.21.0', 'password_reset_email_only':True, 'app_updates':True, 'membership':True,'moderation': True, 'require_email': security.require_email, 'require_e2ee': security.require_e2ee, 'bot_api': 'webhook-v1', 'bot_calls':True,'moments_media':True,'moments_public':public_plaza_open(),'moments_video_covers':True,'bot_calls_default_allowed':True,'call_busy_feedback':True})
+async def health(request): return web.json_response({'ok': True, 'app': 'qingliao', 'version': '1.22.0', 'email_code_login':True, 'password_reset_email_only':True, 'app_updates':True, 'membership':True,'moderation': True, 'require_email': security.require_email, 'require_e2ee': security.require_e2ee, 'bot_api': 'webhook-v1', 'bot_calls':True,'moments_media':True,'moments_public':public_plaza_open(),'moments_video_covers':True,'bot_calls_default_allowed':True,'call_busy_feedback':True})
 
 
 async def register(request):
@@ -273,16 +273,26 @@ async def register(request):
     return web.json_response(new_session(uid))
 
 
-def new_session(uid):
+def new_session(uid, verification_id=None):
     token = secrets.token_urlsafe(32)
-    write('DELETE FROM sessions WHERE expires<?', (now(),))
-    for old in rows('SELECT hash FROM sessions WHERE user_id=? ORDER BY expires DESC LIMIT -1 OFFSET 4', (uid,)):
-        write('DELETE FROM sessions WHERE hash=?', (old['hash'],))
+    # No await/partial commit: a login proof and its new session succeed or roll back together.
+    try:
+        security.consume(verification_id)
+        db.execute('DELETE FROM sessions WHERE expires<?', (now(),))
+        old_sessions = rows('SELECT hash FROM sessions WHERE user_id=? ORDER BY expires DESC LIMIT -1 OFFSET 4', (uid,))
+        for old in old_sessions:
+            db.execute('DELETE FROM sessions WHERE hash=?', (old['hash'],))
+        db.execute('INSERT INTO sessions VALUES(?,?,?)', (hashlib.sha256(token.encode()).hexdigest(), uid, now() + 30 * 86400000))
+        result = {'token': token, 'user': user_public(uid, uid)}
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    for old in old_sessions:
         for ws in tuple(online.get(uid,set())):
             if hashlib.sha256(getattr(ws,'_session_token','').encode()).hexdigest()==old['hash']:
                 asyncio.create_task(close_socket(ws,1008))
-    write('INSERT INTO sessions VALUES(?,?,?)', (hashlib.sha256(token.encode()).hexdigest(), uid, now() + 30 * 86400000))
-    return {'token': token, 'user': user_public(uid, uid)}
+    return result
 
 
 async def login(request):
