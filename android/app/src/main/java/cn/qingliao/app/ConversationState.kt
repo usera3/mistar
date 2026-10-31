@@ -15,7 +15,7 @@ internal object ConversationState {
         if(activeOwner!=owner||activeSession!=session){clearMemory();activeOwner=owner;activeSession=session}
     }
     private fun entry(owner:String,peer:String):Entry {
-        scoped(owner);require(peer.matches(Regex("[0-9]{8}")))
+        scoped(owner);require(ChatAddress.valid(peer))
         if(peer !in cache&&cache.size>=400)cache.entries.firstOrNull{!it.value.dirty}?.let{cache.remove(it.key)}
         require(peer in cache||cache.size<500){"本机会话缓存已满"}
         return cache.getOrPut(peer){Entry(runCatching{LocalData.chatState(owner,peer)}.getOrElse{JSONObject().put("unreadable",true).put("muted",true)})}
@@ -42,7 +42,7 @@ internal object ConversationState {
         val e=entry(owner,peer);val old=e.value
         val normalized=quote?.let{q->
             require(q.keys().asSequence().toSet()==setOf("id","sender","type","excerpt"))
-            require(q.optString("excerpt").length<=160&&q.optString("sender") in setOf(owner,peer))
+            require(q.optString("excerpt").length<=160&&(if(ChatAddress.group(peer))ChatAddress.person(q.optString("sender"))else q.optString("sender") in setOf(owner,peer)))
             java.util.UUID.fromString(q.getString("id"));JSONObject(q.toString())
         }
         if(old.optString("draft")==text&&old.optJSONObject("quote")?.toString()==normalized?.toString()&&old.optInt("start")==start&&old.optInt("end")==end)return

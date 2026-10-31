@@ -135,6 +135,11 @@ def friend(a, b):
     social.require_friend(a,b)
 
 
+def conversation_target(a, b):
+    if groups.is_id(b):groups.member(b, a)
+    else:friend(a, b)
+
+
 def message_public(m):
     m = dict(m)
     if m.get('type') == 'encrypted':
@@ -240,7 +245,7 @@ async def authentication(request, handler):
 def public_plaza_open(): return os.environ.get('QINGLIAO_PUBLIC_PLAZA', '0') == '1'
 
 
-async def health(request): return web.json_response({'ok': True, 'app': 'qingliao', 'version': '1.22.0', 'email_code_login':True, 'password_reset_email_only':True, 'app_updates':True, 'membership':True,'moderation': True, 'require_email': security.require_email, 'require_e2ee': security.require_e2ee, 'bot_api': 'webhook-v1', 'bot_calls':True,'moments_media':True,'moments_public':public_plaza_open(),'moments_video_covers':True,'bot_calls_default_allowed':True,'call_busy_feedback':True})
+async def health(request): return web.json_response({'ok': True, 'app': 'qingliao', 'version': '1.23.0', 'groups':True, 'group_e2ee':'manifest-v1', 'email_code_login':True, 'password_reset_email_only':True, 'app_updates':True, 'membership':True,'moderation': True, 'require_email': security.require_email, 'require_e2ee': security.require_e2ee, 'bot_api': 'webhook-v1', 'bot_calls':True,'moments_media':True,'moments_public':public_plaza_open(),'moments_video_covers':True,'bot_calls_default_allowed':True,'call_busy_feedback':True})
 
 
 async def register(request):
@@ -399,7 +404,7 @@ async def avatar_image(request):
     pid=request.query.get('post','')
     if image and re.fullmatch('[a-f0-9]{32}',pid):
         p=visible_post(uid,pid);post_context=p['audience']=='public' and p['owner']==image['owner']
-    if not image or (image['owner'] != uid and not post_context and not row('SELECT 1 FROM friends WHERE owner=? AND peer=?', (uid, image['owner']))):
+    if not image or (image['owner'] != uid and not post_context and not row('SELECT 1 FROM friends WHERE owner=? AND peer=?', (uid, image['owner'])) and not groups.shared(uid,image['owner'])):
         reject('头像不存在或无权访问', 404)
     path = DATA / 'avatars' / fid
     if not path.is_file(): reject('头像不存在', 404)
@@ -420,6 +425,7 @@ async def contacts(request):
         u = user_public(f['peer'], uid)
         u['state'] = f['state']
         result.append(u)
+    if request.headers.get('X-Mistar-Groups') == '1':result.extend(groups.contacts(uid))
     return web.json_response({'contacts': result})
 
 
@@ -482,6 +488,13 @@ async def conversations(request):
         unread=row('SELECT count(*) AS n FROM messages m WHERE sender=? AND recipient=? AND created>? AND NOT EXISTS(SELECT 1 FROM message_hides h WHERE h.owner=? AND h.message_id=m.id)',(peer,uid,through,uid))['n']
         person=social.person(peer,uid)
         if person:result.append({'user':person,'last':message_public(m),'unread':unread})
+    if request.headers.get('X-Mistar-Groups') == '1':
+        for item in groups.conversations(uid):
+            amount=len(json.dumps(item['last']).encode())
+            if budget+amount>2*1024*1024:
+                m=item['last'];item['last']={k:m[k] for k in ('id','sender','recipient','group_id','group_epoch','created','client_id')};item['last'].update(type='summary',text='[加密群消息，点开查看]')
+            else:budget+=amount
+            result.append(item)
     result.sort(key=lambda x:x['last']['created'],reverse=True)
     return web.json_response({'conversations':result})
 
@@ -564,8 +577,8 @@ async def upload(request):
     uid = request['uid']
     limited('upload:' + uid, 60, 3600)
     peer = request.query.get('recipient', '')
-    friend(uid, peer)
-    if security.require_e2ee and request.headers.get('Content-Type', '').split(';')[0] != 'application/x-qingliao-encrypted': reject('请升级 App 后发送加密附件', 426)
+    conversation_target(uid, peer)
+    if (security.require_e2ee or groups.is_id(peer)) and request.headers.get('Content-Type', '').split(';')[0] != 'application/x-qingliao-encrypted': reject('请升级 App 后发送加密附件', 426)
     if storage_used() >= MAX_STORAGE: reject('服务器存储空间已满', 507)
     name = request.query.get('name', '文件')[:180].replace('/', '_').replace('\\', '_')
     mime = request.headers.get('Content-Type', 'application/octet-stream').split(';')[0]
@@ -583,7 +596,8 @@ async def upload(request):
                 f.write(chunk)
         if size == 0: reject('不能发送空文件')
         guard.storage_check(request, size)
-        bots.ready(peer)
+        conversation_target(uid, peer)
+        if not groups.is_id(peer):bots.ready(peer)
         temporary.replace(path)
         write('INSERT INTO uploads VALUES(?,?,?,?,?,?,?)', (fid, uid, peer, name, mime, size, now()))
     except BaseException:
@@ -596,7 +610,7 @@ async def upload(request):
 async def download(request):
     uid, fid = request['uid'], request.match_info['fid']
     f = row('SELECT * FROM uploads WHERE id=?', (fid,))
-    if not f or uid not in (f['owner'], f['recipient']): reject('文件不存在或无权访问', 404)
+    if not f or not (uid in (f['owner'], f['recipient']) or groups.is_id(f['recipient']) and groups.file_allowed(uid, f)): reject('文件不存在或无权访问', 404)
     if uid == f['recipient'] and not row('SELECT 1 FROM messages WHERE file_id=? AND recipient=?', (fid, uid)): reject('文件尚未发送', 404)
     path = DATA / 'uploads' / fid
     if not path.exists(): reject('文件不存在', 404)
@@ -987,8 +1001,9 @@ async def maintenance(app):
         guard.reap()
         syncstate.reap()
         social.maintenance_sweep()
+        groups.maintenance()
         # Remove incomplete uploads after 24h; sent attachments remain durable.
-        for f in rows('SELECT id FROM uploads WHERE created<? AND id NOT IN (SELECT file_id FROM messages WHERE file_id IS NOT NULL)', (now() - 86400000,)):
+        for f in rows('SELECT id FROM uploads WHERE created<? AND id NOT IN (SELECT file_id FROM messages WHERE file_id IS NOT NULL) AND id NOT IN (SELECT file_id FROM group_messages WHERE file_id IS NOT NULL)', (now() - 86400000,)):
             (DATA / 'uploads' / f['id']).unlink(missing_ok=True)
             write('DELETE FROM uploads WHERE id=?', (f['id'],))
         for f in rows('SELECT id FROM post_photos WHERE post_id IS NULL AND created<?', (now() - 86400000,)):
@@ -1044,6 +1059,8 @@ from releases import Releases
 releases=Releases(globals())
 from membership import Membership
 membership=Membership(globals())
+from groups import Groups
+groups=Groups(globals())
 guard.migrate_emails()
 guard.reap()
 last_message_time = row('SELECT coalesce(max(created),0) AS n FROM messages')['n']
@@ -1058,6 +1075,7 @@ callstate.routes(app)
 syncstate.routes(app)
 social.routes(app)
 storage.routes(app)
+groups.routes(app)
 app.cleanup_ctx.append(lifecycle)
 bots.routes(app)
 botcalls.routes(app)

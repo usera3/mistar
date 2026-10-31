@@ -60,6 +60,8 @@ class MainActivity : Activity() {
     private var peerTitle: TextView? = null
     private var unreadBadge: TextView? = null
     private var homeNavigation:HomeNavigation?=null
+    private var groupSession="";private var groupOwner=""
+    private var homeMenu:PopupMenu?=null
     private var actionSheet: Dialog? = null
     private var messageMenu:MessageActionMenu?=null
     private val messageBubbles=mutableMapOf<String,View>()
@@ -295,7 +297,7 @@ class MainActivity : Activity() {
         val id = intent?.getStringExtra("peer") ?: return
         val u = (0 until contacts.length()).map { contacts.getJSONObject(it) }.find { it.optString("id") == id }
         if (u != null) openChat(u)
-        else Hub.job({ Hub.api("GET", "/api/users?q=$id") }, { it.optJSONObject("user")?.let { u -> openChat(u) } }, { toast(it) })
+        else Hub.job({if(ChatAddress.group(id))Hub.api("GET","/api/groups/$id")else Hub.api("GET", "/api/users?q=$id") }, { (it.optJSONObject("group")?:it.optJSONObject("user"))?.let { u -> openChat(u) } }, { toast(it) })
     }
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
     private fun bg(color: Int, radius: Int = 16, border: Int? = null): GradientDrawable = GradientDrawable().apply { setColor(color); cornerRadius=dp(radius).toFloat(); if(border!=null) setStroke(dp(1),border) }
@@ -332,13 +334,15 @@ class MainActivity : Activity() {
         val colors = intArrayOf(soft,ThemePalette.blend(palette.primary,Color.rgb(250,235,222),.88f),ThemePalette.blend(palette.primary,Color.rgb(229,235,252),.88f),ThemePalette.blend(palette.primary,Color.rgb(249,233,243),.88f))
         return FrameLayout(this).apply {
             background=bg(colors[(u.optString("id").hashCode() and Int.MAX_VALUE)%colors.size],size/2); layoutParams=lp(size,size); clipToOutline=true
-            addView(text(u.optString("nickname", "星").take(1),size*.36f,accent,true).apply { gravity=Gravity.CENTER },FrameLayout.LayoutParams(-1,-1))
+            if(ChatAddress.group(u.optString("id")))addView(Glyph(this@MainActivity,"contacts",accent),FrameLayout.LayoutParams(dp((size*.55f).toInt()),dp((size*.55f).toInt()),Gravity.CENTER))
+            else addView(text(u.optString("nickname", "星").take(1),size*.36f,accent,true).apply { gravity=Gravity.CENTER },FrameLayout.LayoutParams(-1,-1))
             val image=ImageView(this@MainActivity).apply { scaleType=ImageView.ScaleType.CENTER_CROP; contentDescription="头像照片"; visibility=View.GONE }
             addView(image,FrameLayout.LayoutParams(-1,-1)); AvatarImages.load(u.optString("avatar_id"),image)
             if(MemberUi.active(u))addView(MemberFrame(this@MainActivity),FrameLayout.LayoutParams(-1,-1))
         }
     }
     private fun reset(color: Int = canvas,fullVideo:Boolean=false) {
+        homeMenu?.dismiss();homeMenu=null
         videoEdge=fullVideo;WindowCompat.setDecorFitsSystemWindows(window,!fullVideo)
         stashDraft();composerPeer="";inputPanel?.hide();inputPanel=null;inputRowView=null;recorderButton=null;voiceDraftRow=null;voiceDraftPlay=null;voiceDraftCaption=null;voiceDraftIcon="";voiceViews.clear();conversationMenu?.dismiss();conversationMenu=null
         authScreen?.dispose();authScreen=null
@@ -406,11 +410,16 @@ class MainActivity : Activity() {
     private fun size(n: Long) = if(n>=1048576) "%.1f MB".format(n/1048576.0) else if(n>=1024) "%.1f KB".format(n/1024.0) else "$n B"
     private fun canContact():Boolean = peer?.let { !it.optBoolean("blocked") && !it.optBoolean("blocked_by_me") && it.optBoolean("friend",it.optString("state","accepted")=="accepted") } ?: false
     private fun contactGuard():Boolean { if(canContact())return true;toast("请先在聊天设置中添加好友");return false }
-    private fun people() { peer?.let { startActivityForResult(Intent(this,PeopleActivity::class.java).putExtra("peer",it.optString("id")),77);Motion.activityOpen(this) } }
+    private fun launchGroup(id:String=""){groupSession=Hub.token;groupOwner=Hub.me.optString("id");startActivityForResult(Intent(this,GroupActivity::class.java).putExtra("peer",id),85);Motion.activityOpen(this)}
+    private fun people() { peer?.let { if(ChatAddress.group(it.optString("id")))launchGroup(it.getString("id"))else{startActivityForResult(Intent(this,PeopleActivity::class.java).putExtra("peer",it.optString("id")),77);Motion.activityOpen(this)} } }
+    private fun historyPath(id:String)=if(ChatAddress.group(id))"/api/groups/$id/messages"else"/api/messages/$id"
+    private fun readPath(id:String)=if(ChatAddress.group(id))"/api/groups/$id/read"else"/api/read/$id"
+    private fun mutationPath(m:JSONObject)=if(ChatAddress.group(m.optString("group_id")))"/api/groups/${m.getString("group_id")}/messages/${Uri.encode(m.getString("id"))}"else"/api/messages/${Uri.encode(m.getString("id"))}"
+
     private fun refreshRelationship() {
         if(!Hub.connected)return
         val id=peer?.optString("id") ?: return;val session=Hub.token;val generation=chatGeneration
-        Hub.job({Hub.rawApi("GET","/api/relationships/$id",session=session)}, {
+        Hub.job({if(ChatAddress.group(id))Hub.api("GET","/api/groups/$id").getJSONObject("group")else Hub.rawApi("GET","/api/relationships/$id",session=session)}, {
             if(Hub.token!=session||generation!=chatGeneration||peer?.optString("id")!=id)return@job
             val callButtonsChanged=peer?.optBoolean("bot_calls_enabled")!=it.optBoolean("bot_calls_enabled")||peer?.optBoolean("bot_ready")!=it.optBoolean("bot_ready")
             val draft=composer?.text?.toString()?:""
@@ -420,6 +429,7 @@ class MainActivity : Activity() {
     }
     private fun displayName(u:JSONObject)=u.optString("nickname")+if(u.optBoolean("bot"))" · 机器人" else ""
     private fun status(u: JSONObject): String = when {
+        ChatAddress.group(u.optString("id"))->if(u.optBoolean("left"))"已退出群聊"else"${u.optInt("member_count")}人 · "+if(Hub.connected)"群聊"else"连接中…"
         u.optBoolean("blocked_by_me") -> "已加入黑名单"
         u.optBoolean("blocked") || !u.optBoolean("friend",true) -> "未添加好友 · 点右上角设置"
         u.optBoolean("bot") -> if(u.optBoolean("bot_ready"))"机器人 · API 服务" else "机器人暂不可用"
@@ -446,7 +456,7 @@ class MainActivity : Activity() {
     }
     private fun inputChanged(value: CharSequence?) {
         val id = peer?.optString("id") ?: ""
-        if (!Hub.foreground || !Hub.connected || !canContact() || callScreen || id.isEmpty() || value.isNullOrBlank()) { stopTyping(); return }
+        if (!Hub.foreground || !Hub.connected || !canContact() || callScreen || id.isEmpty() || ChatAddress.group(id) || value.isNullOrBlank()) { stopTyping(); return }
         val now = SystemClock.elapsedRealtime()
         if (typingPeer != id || now - lastTypingSent >= 1500) {
             if (typingPeer.isNotEmpty() && typingPeer != id) stopTyping()
@@ -478,31 +488,39 @@ class MainActivity : Activity() {
         }.also{root.addView(it.view,lp(-1,-1))}
     }
 
-    private fun homeConnection() = if(Hub.me.optBoolean("admin_password_change_required"))"请先修改管理员初始密码" else if(Hub.connected) "●  已连接" else "○  连接中…"
+    private fun homeConnection() = if(Hub.me.optBoolean("admin_password_change_required"))"请先修改管理员初始密码" else if(Hub.connected)if(tab==0)"● 在线"else"● 已连接" else "○ 连接中…"
     private fun showHome(tabChange:Boolean=false) {
         clearReadyVoice()
         stashDraft(true);composerPeer=""
         cancelVoiceText();voiceTextResults=JSONObject();hiddenVoiceTexts.clear();voiceTextStates.clear();voiceTextPanels.clear()
         peer=null; Hub.viewingPeer=""; callScreen=false; reset(canvas)
         window.statusBarColor=canvas;window.navigationBarColor=canvas
-        val top=row().apply { setPadding(dp(if(compact)10 else 22),dp(if(tiny)2 else if(compact)8 else 16),dp(if(compact)10 else 20),dp(if(tiny)2 else if(compact)8 else 18)) }
+        val top=row().apply { setPadding(dp(if(compact)10 else if(tab==0)16 else 22),dp(if(tiny)2 else if(compact)8 else 12),dp(if(compact)10 else 16),dp(if(tiny)2 else if(compact)8 else 12)) }
         val heading=col()
         val headingText=text(arrayOf("消息","联系人","动态","我的")[tab],if(tiny)18f else if(compact)20f else 25f,ink,true)
         connectionLabel=text(homeConnection(),if(tiny)10f else 11f,muted).apply{maxLines=1;ellipsize=android.text.TextUtils.TruncateAt.END}
-        if(tiny){
+        if(tab==0){
+            val opening=Hub.token;val who=Hub.me.optString("id")
+            val portrait=avatar(Hub.me,if(compact)34 else 42).apply{tag="home.profile";contentDescription="打开个人资料";setOnClickListener{if(Hub.token==opening&&Hub.me.optString("id")==who&&opening.isNotEmpty()&&peer==null&&!callScreen&&!isDestroyed&&!isFinishing){tab=3;showHome(true)}}}
+            top.addView(portrait,lp(if(compact)34 else 42,if(compact)34 else 42))
+            val identity=col().apply{setPadding(dp(10),0,dp(6),0)}
+            identity.addView(text(Hub.me.optString("nickname","弥星"),if(tiny)16f else 19f,ink).apply{maxLines=1;ellipsize=android.text.TextUtils.TruncateAt.END},lp());space(identity,4)
+            connectionLabel=text(if(Hub.connected)"● 在线"else"○ 连接中…",if(tiny)10f else 11f,if(Hub.connected)accent else muted).apply{maxLines=1}
+            identity.addView(connectionLabel,lp());top.addView(identity,LinearLayout.LayoutParams(0,-2,1f))
+        }else if(tiny){
             val condensed=row();condensed.addView(headingText);condensed.addView(connectionLabel,LinearLayout.LayoutParams(0,-2,1f).apply{marginStart=dp(10)});top.addView(condensed,LinearLayout.LayoutParams(0,-2,1f))
         }else{
             heading.addView(headingText);space(heading,if(compact)3 else 6);heading.addView(connectionLabel);top.addView(heading,LinearLayout.LayoutParams(0,-2,1f))
         }
-        if(tab<2) top.addView(icon("add","添加好友",accent) { searchFriend() }.apply { touch(this,palette.surface,16) })
+        if(tab<2) top.addView(icon("add","添加好友或创建群聊",ink) {}.apply{tag="home.add";setOnClickListener{homeAddMenu(it)}})
         if(tab==2)top.addView(icon("camera","发布动态",accent) { composePost() }.apply { touch(this,palette.surface,16) })
         root.addView(top,lp())
         val scroll=ScrollView(this).apply { isFillViewport=true; clipToPadding=false; isVerticalScrollBarEnabled=false }
-        content=col().apply { setPadding(dp(if(compact)8 else 20),0,dp(if(compact)8 else 20),dp(if(compact)10 else 24)) }; scroll.addView(content)
+        content=col().apply { val side=if(tab==0)0 else if(compact)8 else 20;setPadding(dp(side),0,dp(side),dp(if(compact)10 else 24)) }; scroll.addView(content)
         root.addView(scroll,LinearLayout.LayoutParams(-1,0,1f))
         val nav=homeNavigation?.takeIf{it.themeColor==palette.primary}?:HomeNavigation(this,palette.primary){next->if(Hub.token.isNotEmpty()&&!callScreen&&peer==null&&!isDestroyed&&!isFinishing&&tab!=next){tab=next;showHome(true);refresh()}}
         (nav.parent as? ViewGroup)?.removeView(nav);homeNavigation=nav;unreadBadge=nav.badge
-        root.addView(nav,lp().apply{marginStart=dp(if(compact)4 else 12);marginEnd=dp(if(compact)4 else 12);bottomMargin=dp(if(compact)2 else 8);topMargin=dp(6)})
+        root.addView(nav,lp())
         nav.select(tab,tabChange)
         renderHome(); updateUnreadBadge();if(tabChange)Motion.reveal(scroll,y=5f,duration=190,from=.6f)
     }
@@ -511,10 +529,18 @@ class MainActivity : Activity() {
         unreadBadge?.apply { text=if(count>99)"99+" else count.toString(); visibility=if(count>0)View.VISIBLE else View.GONE; contentDescription="$count 条未读消息" }
     }
     private fun searchBar(parent: LinearLayout) {
-        val search=row().apply { touch(this,palette.surface,18);background=RippleDrawable(ColorStateList.valueOf(palette.ripple),BrandUi.card(this@MainActivity,palette,18),bg(Color.WHITE,18)); setPadding(dp(16),0,dp(16),0); contentDescription="搜索聊天与联系人"; setOnClickListener { localSearch() } }
+        val search=row().apply { gravity=Gravity.CENTER;touch(this,palette.surface,13);setPadding(dp(16),0,dp(16),0); contentDescription="搜索聊天与联系人"; setOnClickListener { localSearch() } }
         search.addView(Glyph(this,"search",muted),lp(18,18))
-        search.addView(text(if(tiny)"搜索消息与联系人"else"搜索聊天与联系人",if(tiny)12f else 14f,muted).apply {maxLines=1;ellipsize=android.text.TextUtils.TruncateAt.END;setPadding(dp(10),0,0,0)})
-        parent.addView(search,lp(-1,if(tiny)40 else 48).apply {topMargin=dp(2);bottomMargin=dp(if(tiny)10 else 6)})
+        search.addView(text("搜索",14f,muted).apply {maxLines=1;setPadding(dp(8),0,0,0)})
+        parent.addView(search,lp(-1,if(tiny)36 else 42).apply {topMargin=dp(2);bottomMargin=dp(if(tiny)8 else 12);if(tab==0){marginStart=dp(if(compact)8 else 16);marginEnd=marginStart}})
+    }
+    private fun homeAddMenu(anchor:View){
+        if(peer!=null||callScreen||isDestroyed||isFinishing)return
+        val session=Hub.token
+        homeMenu?.dismiss();homeMenu=PopupMenu(this,anchor,Gravity.END).apply{
+            menu.add(0,1,0,"创建群聊");menu.add(0,2,1,"添加好友")
+            setOnMenuItemClickListener{item->if(Hub.token==session&&session.isNotEmpty()&&!isDestroyed&&!isFinishing&&peer==null&&!callScreen){if(item.itemId==1)launchGroup()else searchFriend()};true};show()
+        }
     }
     private fun localSearch(){launchSearch()}
     private fun launchSearch(user:JSONObject?=null){
@@ -552,7 +578,11 @@ class MainActivity : Activity() {
         if(action!=null) box.addView(button(action) { click?.invoke() })
         parent.addView(box,lp())
     }
-    private fun preview(m: JSONObject): String = when(m.optString("type")) { "html"->"[HTML 消息]"; "image"->"[图片]"; "voice"->"[语音消息]"; "file"->"[文件] " + (m.optJSONObject("file")?.optString("name") ?: ""); else->m.optString("text") }
+    private fun preview(m: JSONObject): String {
+        val value=when(m.optString("type")) { "html"->"[HTML 消息]"; "image"->"[图片]"; "voice"->"[语音消息]"; "file"->"[文件] " + (m.optJSONObject("file")?.optString("name") ?: ""); else->m.optString("text") }
+        val sender=m.optJSONObject("sender_user")?.optString("nickname").orEmpty()
+        return if(ChatAddress.group(m.optString("group_id"))&&m.optString("sender")!=Hub.me.optString("id")&&m.optString("type")!="call"&&sender.isNotEmpty())"$sender：$value"else value
+    }
     private fun conversationActions(anchor:View,user:JSONObject){
         val session=Hub.token;val owner=Hub.me.optString("id");val id=user.getString("id")
         val state=ConversationState.state(owner,id);conversationMenu?.dismiss()
@@ -562,7 +592,7 @@ class MainActivity : Activity() {
             menu.add(0,3,2,"聊天设置")
             setOnMenuItemClickListener{item->
                 if(Hub.token==session&&!isFinishing&&!isDestroyed){
-                    if(item.itemId==3)startActivityForResult(Intent(this@MainActivity,PeopleActivity::class.java).putExtra("peer",id),77)
+                    if(item.itemId==3){if(ChatAddress.group(id))launchGroup(id)else startActivityForResult(Intent(this@MainActivity,PeopleActivity::class.java).putExtra("peer",id),77)}
                     else{
                         val key=if(item.itemId==1)"pinned"else"muted";val value=if(item.itemId==1)state.optLong("pinned_at")==0L else !state.optBoolean("muted")
                         Hub.job({ConversationState.flag(owner,session,id,key,value);JSONObject()},{
@@ -603,22 +633,20 @@ class MainActivity : Activity() {
         if(signature==homeSignature)return
         homeSignature=signature
         contactStatusLabels.clear(); parent.removeAllViews()
+        if(tab<2)searchBar(parent)
         if(tab==0)AppUpdates.available?.let{release->
             parent.addView(text("弥星 ${release.version} 已发布  ›",13f,accent).apply{
-                setPadding(dp(14),dp(12),dp(14),dp(12));background=bg(soft,14);minimumHeight=dp(44)
+                setPadding(dp(16),dp(6),dp(16),dp(6));minimumHeight=dp(30);textSize=11f
                 contentDescription="查看版本更新";isFocusable=true;setOnClickListener{startActivity(Intent(this@MainActivity,UpdateActivity::class.java))}
-            },lp().apply{topMargin=dp(6);bottomMargin=dp(8)})
+            },lp().apply{bottomMargin=dp(4)})
         }
-        if(tab<2)searchBar(parent)
         if(tab==0) {
             val rows=ConversationState.conversations(Hub.me.optString("id"),contacts,conversations)
             if(rows.isEmpty()){empty(parent,"把第一句你好，送出去","添加朋友，开启一段新的对话","添加朋友"){searchFriend()};return}
-            if(!tiny)section(parent,"最近聊天 · ${rows.size}")
-            val list=col().apply{background=BrandUi.card(this@MainActivity,palette,20);clipToOutline=true}
+            val list=col()
             rows.forEachIndexed{index,c->
                 val u=c.getJSONObject("user");val last=c.getJSONObject("last")
                 list.addView(ConversationRow(this,palette,c,avatar(u,if(compact)40 else 50),preview(last).ifEmpty{"还没有消息"},{openChat(u)},{anchor->conversationActions(anchor,u)}),lp())
-                if(index<rows.lastIndex)divider(list,if(compact)59 else 77)
             };parent.addView(list,lp())
         } else if(tab==1) renderContacts(parent) else renderProfile(parent)
     }
@@ -633,7 +661,12 @@ class MainActivity : Activity() {
                 parent.addView(item,lp().apply { bottomMargin=dp(10) })
             }
         }
-        val friends=(0 until contacts.length()).map { contacts.getJSONObject(it) }.filter { it.optString("state")=="accepted" }.sortedBy { it.optString("nickname") }
+        val groupChats=(0 until contacts.length()).map{contacts.getJSONObject(it)}.filter{ChatAddress.group(it.optString("id"))}
+        if(groupChats.isNotEmpty()){
+            section(parent,"群聊 · ${groupChats.size}");val groupList=col().apply{background=BrandUi.card(this@MainActivity,palette);clipToOutline=true}
+            groupChats.forEach{g->val entry=row().apply{tag="contact.group.${g.getString("id")}";touch(this,palette.surface,0);setPadding(dp(14),dp(10),dp(14),dp(10));setOnClickListener{openChat(g)}};entry.addView(avatar(g,40));val label=col().apply{setPadding(dp(12),0,dp(8),0)};label.addView(text(g.optString("nickname"),15f,ink,true).apply{maxLines=1;ellipsize=android.text.TextUtils.TruncateAt.END});space(label,4);label.addView(text("${g.optInt("member_count")}人",12f,muted));entry.addView(label,LinearLayout.LayoutParams(0,-2,1f));entry.addView(Glyph(this,"arrow",muted),lp(16,16));groupList.addView(entry,lp())};parent.addView(groupList,lp())
+        }
+        val friends=(0 until contacts.length()).map { contacts.getJSONObject(it) }.filter { it.optString("state")=="accepted"&&!ChatAddress.group(it.optString("id")) }.sortedBy { it.optString("nickname") }
         section(parent,"我的朋友 · ${friends.size}")
         if(friends.isEmpty()) { empty(parent,"朋友，让生活热闹一点","用账号或弥星号，找到彼此","添加朋友") { searchFriend() }; return }
         val group=col().apply{background=BrandUi.card(this@MainActivity,palette);clipToOutline=true}
@@ -894,7 +927,7 @@ class MainActivity : Activity() {
                 Hub.io.execute{
                     val removed=mutableSetOf<String>();var error=""
                     for(item in items){if(cancelled.get()||Hub.token!=session)break
-                        try{Hub.rawApi("DELETE","/api/messages/"+Uri.encode(item.getString("id")),session=session,requestTag=tag);removed.add(item.getString("id"))}
+                        try{Hub.rawApi("DELETE",mutationPath(item),session=session,requestTag=tag);removed.add(item.getString("id"))}
                         catch(e:Exception){if(e is ApiFailure&&e.status==404)removed.add(item.getString("id"))else{error=e.message?:"删除失败";break}}
                         val count=removed.size;Hub.main.post{if(dialog.isShowing)dialog.setMessage("$count / ${items.size}")}
                     }
@@ -949,7 +982,7 @@ class MainActivity : Activity() {
         AlertDialog.Builder(this).setTitle(if(withdraw)"撤回消息？" else "删除这条记录？")
             .setMessage(if(withdraw)"对方可能已经看过或保存这条消息。" else "只删除自己账号各设备上的这条记录，无法恢复。")
             .setNegativeButton("取消",null).setPositiveButton("确定") { _,_ ->
-                Hub.job({check(Hub.token==session);Hub.rawApi(if(withdraw)"POST" else "DELETE","/api/messages/$id"+if(withdraw)"/withdraw" else "",session=session)}, { result ->
+                Hub.job({check(Hub.token==session);Hub.rawApi(if(withdraw)"POST" else "DELETE",mutationPath(m)+if(withdraw)"/withdraw" else "",session=session)}, { result ->
                     if(Hub.token!=session||chatGeneration!=generation||peer?.optString("id")!=target)return@job
                     if(withdraw){val index=messages.indexOfFirst{it.optString("id")==id};if(index>=0)messages[index]=result}
                     else messages.removeAll{it.optString("id")==id}
@@ -1039,6 +1072,7 @@ class MainActivity : Activity() {
     }
 
     private fun openChat(u: JSONObject) {
+        if(ChatAddress.group(u.optString("id")))GroupDirectory.remember(u)
         if(readyVoice?.peer!=u.optString("id"))clearReadyVoice()
         stashDraft(true);composerPeer=""
         chatGeneration++
@@ -1056,7 +1090,7 @@ class MainActivity : Activity() {
         peerTitle=text(if(compact)u.optString("nickname") else displayName(u),17f,ink,true).apply { maxLines=1; ellipsize=android.text.TextUtils.TruncateAt.END }; info.addView(peerTitle,lp()); space(info,4)
         connectionLabel=text(status(u),11f,if(Hub.connected && u.optBoolean("online"))accent else muted).apply{maxLines=1;ellipsize=android.text.TextUtils.TruncateAt.END}; info.addView(connectionLabel)
         top.addView(info,LinearLayout.LayoutParams(0,-2,1f))
-        if(!u.optBoolean("bot") || u.optBoolean("bot_calls_enabled")&&u.optBoolean("bot_ready")) {
+        if(!ChatAddress.group(u.optString("id"))&&(!u.optBoolean("bot") || u.optBoolean("bot_calls_enabled")&&u.optBoolean("bot_ready"))) {
             top.addView(icon("phone","语音通话",accent) { beginCall(false) }.apply { touch(this,canvas,22) },lp(if(compact)40 else 48,if(compact)40 else 48).apply { marginEnd=dp(if(compact)0 else 6) })
             if(!compact)top.addView(icon("video","视频通话",accent) { beginCall(true) }.apply { touch(this,canvas,22) },lp(48,48))
         }
@@ -1125,7 +1159,7 @@ class MainActivity : Activity() {
             ChatInputPanel.Action("dictate","语音输入",{Hub.call==null&&recording==null}){startDictation()},
             ChatInputPanel.Action("code","HTML 卡片"){htmlEditor()},
             ChatInputPanel.Action("video","音视频通话",{recording==null}){chatMenu()}
-        )){root.post{if(!isDestroyed)updateCompactChat()}}
+        ).filterNot{ChatAddress.group(u.optString("id"))&&it.kind=="video"}){root.post{if(!isDestroyed)updateCompactChat()}}
         compose.addView(inputPanel,lp());root.addView(compose);composerPanel=compose;composerOwner=owner;composerSession=session;composerPeer=target;restoreDraft();renderMessages();loadVoiceTexts()
         renderRecordingUi()
     }
@@ -1137,6 +1171,7 @@ class MainActivity : Activity() {
         if(header.visibility!=visibility)header.visibility=visibility
     }
     private fun chatMenu(){
+        if(ChatAddress.group(peer?.optString("id").orEmpty())){people();return}
         showActions("聊天操作",actions=listOf(
             ActionSheets.Action("phone","语音通话"){beginCall(false)},
             ActionSheets.Action("video","视频通话"){beginCall(true)},
@@ -1217,7 +1252,7 @@ class MainActivity : Activity() {
         val id=peer?.getString("id") ?: return
         val generation=chatGeneration;val session=Hub.token
         val before=if(older && messages.isNotEmpty())"?before="+messages.first().optLong("created") else ""
-        Hub.job({ Hub.api("GET","/api/messages/$id$before") }, { result ->
+        Hub.job({ Hub.api("GET",historyPath(id)+before) }, { result ->
             if(peer?.optString("id")!=id||generation!=chatGeneration||session!=Hub.token)return@job
             if(stamp!=LocalData.epoch(Hub.me.optString("id"))){loadMessages(older);return@job}
             val list=result.getJSONArray("messages")
@@ -1227,7 +1262,7 @@ class MainActivity : Activity() {
                 messages.clear();messages.addAll(batch);messages.addAll(live);messages.sortBy { it.optLong("created") }
             }
             hasMore=result.optBoolean("has_more"); renderMessages(!older,older)
-            Hub.io.execute { try { Hub.rawApi("POST","/api/read/$id",session=session) } catch(_:Exception){} }
+            Hub.io.execute { try { Hub.rawApi("POST",readPath(id),session=session) } catch(_:Exception){} }
         }, { if(generation==chatGeneration&&session==Hub.token)toast(it) })
     }
     private fun renderMessages(scroll: Boolean = true,older: Boolean=false) {
@@ -1258,7 +1293,8 @@ class MainActivity : Activity() {
         val mine=m.optString("sender")==Hub.me.optString("id")
         val holder=row().apply { tag=m.optString("id");gravity=Gravity.TOP or if(mine)Gravity.END else Gravity.START; setPadding(0,dp(4),0,dp(if(compact)6 else 12)) }
         val body=col().apply { gravity=if(mine)Gravity.END else Gravity.START }
-        val person=avatar(if(mine)Hub.me else peer ?: JSONObject(),if(compact)24 else 36).apply {
+        if(ChatAddress.group(m.optString("group_id"))&&!mine){body.addView(text(m.optJSONObject("sender_user")?.optString("nickname")?:"群成员",11f,muted).apply{maxLines=1;ellipsize=android.text.TextUtils.TruncateAt.END;maxWidth=(resources.displayMetrics.widthPixels*.68f).toInt()});space(body,4)}
+        val person=avatar(if(mine)Hub.me else if(ChatAddress.group(m.optString("group_id")))m.optJSONObject("sender_user")?:JSONObject().put("nickname","群")else peer ?: JSONObject(),if(compact)24 else 36).apply {
             (background as GradientDrawable).cornerRadius=dp(18).toFloat()
             contentDescription=if(mine)"我的头像" else "对方头像"
         }
@@ -1329,7 +1365,7 @@ class MainActivity : Activity() {
         if(mine) {
             val receipt=row().apply { gravity=Gravity.END; setPadding(0,dp(if(compact)3 else 6),dp(2),0) }
             val clock=text(SimpleDateFormat("HH:mm",Locale.CHINA).format(Date(created)),10f,muted);receipt.addView(clock)
-            val readLabel=text(" · "+if(m.optBoolean("pending"))when(m.optString("send_state")){"blocked"->"发送失败 · 点按重试";"failed"->"等待重试";"sending"->"发送中";else->"待发送"} else if(m.optBoolean("read"))"已读" else "已发送",10f,if(m.optBoolean("read"))accent else muted).apply{this.maxWidth=(maxBubbleWidth-clock.paint.measureText(clock.text.toString()).toInt()-dp(2)).coerceAtLeast(dp(50));maxLines=2;ellipsize=android.text.TextUtils.TruncateAt.END}
+            val readLabel=text(" · "+if(m.optBoolean("pending"))when(m.optString("send_state")){"blocked"->"发送失败 · 点按重试";"failed"->"等待重试";"sending"->"发送中";else->"待发送"} else if(ChatAddress.group(m.optString("group_id"))&&m.optInt("read_count")>0)"${m.optInt("read_count")}人已读"else if(m.optBoolean("read"))"已读" else "已发送",10f,if(m.optBoolean("read"))accent else muted).apply{this.maxWidth=(maxBubbleWidth-clock.paint.measureText(clock.text.toString()).toInt()-dp(2)).coerceAtLeast(dp(50));maxLines=2;ellipsize=android.text.TextUtils.TruncateAt.END}
             receipt.addView(readLabel);receiptLabels[m.optString("id")]=readLabel;if(m.optBoolean("pending")){readLabel.setOnClickListener{messageActions(m)};readLabel.contentDescription="待发消息操作"};body.addView(receipt)
         }
         holder.addView(body,bodyParams)
@@ -1500,10 +1536,18 @@ class MainActivity : Activity() {
     @Deprecated("Android result API")
     override fun onActivityResult(code: Int,result: Int,data: Intent?) {
         super.onActivityResult(code,result,data)
+        if(code==85){
+            if(result==RESULT_OK&&Hub.token==groupSession&&Hub.me.optString("id")==groupOwner){
+                val left=data?.getStringExtra("left").orEmpty()
+                if(left.isNotEmpty()){GroupDirectory.removed(left);if(peer?.optString("id")==left)leaveChat()}
+                data?.getStringExtra("group")?.let{runCatching{JSONObject(it)}.getOrNull()?.takeIf{g->ChatAddress.group(g.optString("id"))}?.let{g->openChat(g)}}
+                refresh();refreshRelationship()
+            };groupSession="";groupOwner="";return
+        }
         if(code==82){
             if(result==RESULT_OK&&Hub.token==searchSession&&Hub.me.optString("id")==searchOwner&&data!=null){
                 val id=data.getStringExtra("peer").orEmpty()
-                if(id.matches(Regex("[0-9]{8}"))){
+                if(ChatAddress.valid(id)){
                     val user=(0 until contacts.length()).map{contacts.getJSONObject(it)}.find{it.optString("id")==id}?:runCatching{JSONObject(data.getStringExtra("user").orEmpty()).takeIf{it.optString("id")==id}}.getOrNull()
                     if(user!=null){val mid=data.getStringExtra("message").orEmpty();if(mid.isEmpty())openChat(user)else openSearchMessage(user,mid)}
                 }
@@ -1664,6 +1708,7 @@ class MainActivity : Activity() {
     private fun saveAttachment(f: JSONObject) { fetchAttachment(f) { file -> saveFile=file;saveSession=Hub.token;startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType(f.optString("mime","application/octet-stream")).putExtra(Intent.EXTRA_TITLE,f.optString("name","文件")),62) } }
 
     private fun beginCall(video: Boolean) {
+        if(ChatAddress.group(peer?.optString("id").orEmpty())){toast("群聊暂不支持群通话");return}
         if(!contactGuard())return
         if(peer?.optBoolean("bot")==true && peer?.optBoolean("bot_calls_enabled")!=true){toast("开发者暂未启用机器人通话");return}
         if(!Hub.connected) { toast("正在连接服务器，请稍后再试"); return }
@@ -1969,6 +2014,15 @@ class MainActivity : Activity() {
                 if(callScreen)showCall() else if(peer!=null) { if(buttonsChanged){showChat();composer?.setText(draft);composer?.setSelection(draft.length)}else{renderMessages(false);updateStatusLabels()} } else renderHome()
                 refresh()
             }
+            "group.changed"->{refresh();if(peer?.optString("id")==event.optString("group_id"))refreshRelationship()}
+            "group.removed"->{if(peer?.optString("id")==event.optString("group_id")){peer?.put("left",true)?.put("friend",false);leaveChat();toast("你已退出群聊或群聊已解散")};refresh()}
+            "group.read"->{
+                val id=event.optString("group_id");val reader=event.optString("reader");val me=Hub.me.optString("id")
+                if(id==peer?.optString("id")&&reader!=me){for(m in messages.filter{it.optString("sender")==me&&!it.optBoolean("pending")&&it.optLong("created")<=event.optLong("at")}){
+                    val eligible=m.optJSONArray("group_recipients")?:JSONArray();if((0 until eligible.length()).none{eligible.optString(it)==reader})continue
+                    val old=m.optJSONArray("readers")?:JSONArray();val readers=(0 until old.length()).map{old.optString(it)}.toMutableSet();readers.add(reader);m.put("readers",JSONArray(readers.toList())).put("read_count",readers.size);receiptLabels[m.optString("id")]?.text=" · ${readers.size}人已读"
+                }};if(reader==me)refresh()
+            }
             "ready", "contacts.changed", "presence" -> {
                 if(event.optString("event")!="presence")refreshRelationship()
                 if(event.optString("event")=="presence" && peer!=null && event.optJSONObject("user")?.optString("id")==peer?.optString("id")) {
@@ -1984,7 +2038,7 @@ class MainActivity : Activity() {
                 if(peer!=null&&!callScreen)loadMessages(false)
             }
             "outbox.changed" -> {
-                event.optJSONObject("message")?.let{m->val id=peer?.optString("id");if(id!=null&&id in listOf(m.optString("sender"),m.optString("recipient")))appendMessage(m)}
+                event.optJSONObject("message")?.let{m->val id=peer?.optString("id");if(id!=null&&id==ChatAddress.peer(m,Hub.me.optString("id")))appendMessage(m)}
                 if(peer!=null)loadPending()else if(!callScreen)refresh()
             }
             "relationship.changed" -> { refresh();refreshRelationship();feed?.refreshFromTop() }
@@ -2008,9 +2062,9 @@ class MainActivity : Activity() {
             "typing" -> if(event.optString("peer")==peer?.optString("id")) updateStatusLabels()
             "message" -> {
                 val m=event.getJSONObject("message"); val id=peer?.optString("id")
-                if(id!=null && id in listOf(m.optString("sender"),m.optString("recipient"))) {
+                if(id!=null && id==ChatAddress.peer(m,Hub.me.optString("id"))) {
                     appendMessage(m)
-                    if(m.optString("sender")==id && Hub.foreground){val session=Hub.token;Hub.io.execute { try { Hub.rawApi("POST","/api/read/$id",session=session) } catch(_:Exception){} }}
+                    if(m.optString("sender")!=Hub.me.optString("id") && Hub.foreground){val session=Hub.token;Hub.io.execute { try { Hub.rawApi("POST",readPath(id),session=session) } catch(_:Exception){} }}
                 }
                 refresh()
             }

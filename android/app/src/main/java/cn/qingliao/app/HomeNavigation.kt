@@ -16,17 +16,14 @@ internal class HomeNavigation(context:Context,val themeColor:Int,private val cha
     private val items=mutableListOf<LinearLayout>()
     private val icons=mutableListOf<Glyph>()
     private val labels=mutableListOf<TextView>()
-    private val selectedRect=RectF()
-    private val paint=Paint(Paint.ANTI_ALIAS_FLAG).apply{color=p.soft}
-    private var animation:ValueAnimator?=null
     private var selected=0
     val badge=u.text("",9f,Color.WHITE,true).apply{
         gravity=Gravity.CENTER;minWidth=u.dp(17);minimumHeight=u.dp(17);setPadding(u.dp(4),u.dp(1),u.dp(4),u.dp(1))
         background=BrandUi.rounded(context,0xFFC14149.toInt(),10);visibility=View.GONE
     }
     init {
-        tag="home.navigation";orientation=HORIZONTAL;gravity=Gravity.CENTER_VERTICAL;setWillNotDraw(false)
-        setPadding(u.dp(4),u.dp(4),u.dp(4),u.dp(4));background=BrandUi.card(context,p,22);clipChildren=false
+        tag="home.navigation";orientation=HORIZONTAL;gravity=Gravity.CENTER_VERTICAL
+        setPadding(u.dp(4),u.dp(3),u.dp(4),u.dp(3));setBackgroundColor(p.surface);clipChildren=false
         listOf("chat" to "消息","contacts" to "联系人","moments" to "动态","me" to "我的").forEachIndexed{index,(kind,title)->
             val item=u.col().apply{
                 tag="home.nav.$index";contentDescription=title;gravity=Gravity.CENTER;isFocusable=true
@@ -44,24 +41,8 @@ internal class HomeNavigation(context:Context,val themeColor:Int,private val cha
     }
     fun select(index:Int,animate:Boolean){
         require(index in 0..3);selected=index
-        items.forEachIndexed{n,item->val active=n==index;item.isSelected=active;icons[n].color=if(active)p.accent else p.muted;icons[n].invalidate();labels[n].setTextColor(if(active)p.accent else p.muted);labels[n].setTypeface(null,if(active)Typeface.BOLD else Typeface.NORMAL)}
-        post{if(isAttachedToWindow)move(animate)}
+        items.forEachIndexed{n,item->val active=n==index;item.isSelected=active;icons[n].color=if(active)p.accent else p.ink;if(n==0)icons[n].variant(if(active)"chatFill"else"chat");icons[n].invalidate();labels[n].setTextColor(if(active)p.accent else p.ink);labels[n].setTypeface(null,Typeface.NORMAL)}
+        if(animate)Motion.reveal(icons[index],y=0f,duration=140,from=.65f)
     }
-    private fun target():RectF{
-        val item=items[selected];val inset=u.dp(if(compact)2 else 6).toFloat()
-        return RectF(item.left+inset,paddingTop.toFloat(),item.right-inset,(height-paddingBottom).toFloat())
-    }
-    private fun move(animate:Boolean){
-        animation?.cancel();animation=null
-        val end=target();if(end.width()<=0)return
-        if(!animate||!Motion.enabled()||selectedRect.isEmpty){selectedRect.set(end);invalidate();return}
-        val origin=RectF(selectedRect)
-        animation=ValueAnimator.ofFloat(0f,1f).apply{
-            duration=220;interpolator=Motion.ease
-            addUpdateListener{val t=it.animatedValue as Float;selectedRect.set(origin.left+(end.left-origin.left)*t,origin.top+(end.top-origin.top)*t,origin.right+(end.right-origin.right)*t,origin.bottom+(end.bottom-origin.bottom)*t);invalidate()};start()
-        }
-    }
-    override fun onLayout(changed:Boolean,l:Int,t:Int,r:Int,b:Int){super.onLayout(changed,l,t,r,b);if(changed||selectedRect.isEmpty)move(false)}
-    override fun onDraw(canvas:Canvas){super.onDraw(canvas);val radius=u.dp(16).toFloat();canvas.drawRoundRect(selectedRect,radius,radius,paint)}
-    override fun onDetachedFromWindow(){animation?.cancel();animation=null;super.onDetachedFromWindow()}
+    override fun onDetachedFromWindow(){icons.forEach{Motion.rest(it)};super.onDetachedFromWindow()}
 }

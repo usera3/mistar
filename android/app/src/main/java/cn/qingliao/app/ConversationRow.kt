@@ -17,15 +17,15 @@ internal class ConversationRow(context:Context,p:ThemePalette,conversation:JSONO
     init {
         val u=FormUi(context,p);val user=conversation.getJSONObject("user");val local=conversation.getJSONObject("local")
         val pinned=local.optLong("pinned_at")>0;val muted=local.optBoolean("muted");val unread=conversation.optInt("unread").coerceAtLeast(0)
-        tag="conversation:${user.getString("id")}";gravity=Gravity.CENTER_VERTICAL;minimumHeight=u.dp(if(u.tiny)60 else if(u.compact)70 else 80)
+        tag="conversation:${user.getString("id")}";gravity=Gravity.CENTER_VERTICAL;minimumHeight=u.dp(if(u.compact)60 else 74)
         setPadding(u.dp(if(u.compact)9 else 14),u.dp(if(u.tiny)7 else 11),u.dp(if(u.compact)9 else 14),u.dp(if(u.tiny)7 else 11))
-        background=RippleDrawable(ColorStateList.valueOf(p.ripple),BrandUi.rounded(context,if(pinned)p.soft else p.surface,0),null)
+        background=RippleDrawable(ColorStateList.valueOf(p.ripple),BrandUi.rounded(context,if(pinned)p.soft else p.canvas,0),null)
         isFocusable=true;isLongClickable=true;setOnClickListener{open()};setOnLongClickListener{actions(this);true}
         val photo=FrameLayout(context);val side=if(u.tiny)36 else if(u.compact)40 else 50
         photo.addView(portrait,FrameLayout.LayoutParams(u.dp(side),u.dp(side)))
         if(unread>0){
-            val badge=if(muted)View(context).apply{background=BrandUi.rounded(context,p.muted,8)}else u.text(if(unread>99)"99+"else"$unread",10f,p.onPrimary,true).apply{
-                gravity=Gravity.CENTER;minWidth=u.dp(18);minimumHeight=u.dp(18);setPadding(u.dp(4),u.dp(1),u.dp(4),u.dp(1));background=BrandUi.rounded(context,p.primary,12)
+            val badge=if(muted)View(context).apply{background=BrandUi.rounded(context,p.muted,8)}else u.text(if(unread>99)"99+"else"$unread",10f,android.graphics.Color.WHITE,true).apply{
+                gravity=Gravity.CENTER;minWidth=u.dp(18);minimumHeight=u.dp(18);setPadding(u.dp(4),u.dp(1),u.dp(4),u.dp(1));background=BrandUi.rounded(context,0xFFD43A36.toInt(),12)
             }
             badge.contentDescription=if(muted)"免打扰，$unread 条未读消息"else"$unread 条未读消息"
             photo.addView(badge,FrameLayout.LayoutParams(if(muted)u.dp(8)else -2,if(muted)u.dp(8)else -2,Gravity.TOP or Gravity.END))
@@ -57,7 +57,7 @@ internal class ConversationRow(context:Context,p:ThemePalette,conversation:JSONO
             if(date.timeInMillis==today.timeInMillis)return SimpleDateFormat("HH:mm",Locale.CHINA).format(Date(ms))
             today.add(Calendar.DAY_OF_YEAR,-1);if(today.timeInMillis==date.timeInMillis)return "昨天"
             today.add(Calendar.DAY_OF_YEAR,-5);if(date.timeInMillis in today.timeInMillis..now)return SimpleDateFormat("EEE",Locale.CHINA).format(Date(ms))
-            return SimpleDateFormat(if(Calendar.getInstance().apply{timeInMillis=now}.get(Calendar.YEAR)==date.get(Calendar.YEAR))"M-d"else"yyyy-MM-dd",Locale.CHINA).format(Date(ms))
+            return SimpleDateFormat(if(Calendar.getInstance().apply{timeInMillis=now}.get(Calendar.YEAR)==date.get(Calendar.YEAR))"MM/dd"else"yyyy/MM/dd",Locale.CHINA).format(Date(ms))
         }
     }
 }

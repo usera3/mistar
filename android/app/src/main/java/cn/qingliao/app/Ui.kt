@@ -4,7 +4,8 @@ import android.content.Context
 import android.graphics.*
 import android.view.View
 
-class Glyph(context: Context, private val kind: String, var color: Int = Color.rgb(30, 35, 43)) : View(context) {
+class Glyph(context: Context, private var kind: String, var color: Int = Color.rgb(30, 35, 43)) : View(context) {
+    fun variant(value:String){if(kind!=value){kind=value;invalidate()}}
     override fun onDraw(c: Canvas) {
         super.onDraw(c)
         c.save(); val scale = minOf(width, height) / 24f; c.translate((width - 24 * scale) / 2, (height - 24 * scale) / 2); c.scale(scale, scale)
@@ -28,6 +29,7 @@ class Glyph(context: Context, private val kind: String, var color: Int = Color.r
             "minus" -> line(5f,12f,19f,12f)
             "trash" -> { line(4f,6f,20f,6f);line(9f,6f,9f,3f,15f,3f,15f,6f);line(6f,6f,7f,21f,17f,21f,18f,6f);line(10f,10f,10f,17f);line(14f,10f,14f,17f) }
             "chat" -> { round(3f,3f,21f,17f,5f); line(6f,17f,6f,21f,11f,17f); c.drawCircle(8f,10f,.7f,p); c.drawCircle(12f,10f,.7f,p); c.drawCircle(16f,10f,.7f,p) }
+            "chatFill" -> { p.style=Paint.Style.FILL;round(2f,3f,22f,18f,6f);val tail=Path();tail.moveTo(6f,16f);tail.lineTo(6f,22f);tail.lineTo(13f,17f);tail.close();c.drawPath(tail,p);p.color=Color.WHITE;listOf(7.5f,12f,16.5f).forEach{c.drawCircle(it,10.5f,1f,p)} }
             "contacts" -> { c.drawCircle(9f,8f,3.5f,p); c.drawArc(3f,13f,15f,23f,180f,180f,false,p); c.drawArc(12f,4f,20f,12f,-70f,150f,false,p); c.drawArc(13f,13f,23f,22f,210f,150f,false,p) }
             "me" -> { c.drawCircle(12f,8f,4f,p); c.drawArc(4f,14f,20f,26f,180f,180f,false,p) }
             "search" -> { c.drawCircle(10.5f,10.5f,6.5f,p); line(16f,16f,21f,21f) }

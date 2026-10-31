@@ -20,12 +20,13 @@ object Outbox {
     fun pending(owner:String,p:JSONObject):JSONObject = JSONObject().put("id","local:"+p.getString("client_id")).put("client_id",p.getString("client_id"))
         .put("sender",owner).put("recipient",p.getString("recipient")).put("type",p.getString("type")).put("text",p.optString("text"))
         .put("created",p.optLong("local_created",System.currentTimeMillis())).put("pending",true).put("send_state",p.optString("local_state","queued"))
-        .put("send_error",p.optString("local_error")).apply{p.optJSONObject("private_file")?.let{put("file",it);put("file_id",it.optString("id"))};p.optJSONObject("quote")?.let{put("quote",it)}}
+        .put("send_error",p.optString("local_error")).apply{if(ChatAddress.group(p.optString("recipient")))put("group_id",p.getString("recipient"));p.optJSONObject("private_file")?.let{put("file",it);put("file_id",it.optString("id"))};p.optJSONObject("quote")?.let{put("quote",it)}}
     private fun enqueue(p:JSONObject,session:String,owner:String,clearDraft:Boolean=false):JSONObject {
         require(Hub.token==session&&Hub.me.optString("id")==owner){"登录状态已改变"}
         val inner=JSONObject().put("type",p.getString("type")).put("text",p.optString("text"));p.optJSONObject("private_file")?.let{inner.put("file",it)}
         p.optJSONObject("quote")?.let{inner.put("quote",it)}
-        PayloadRules.validate(inner,p.optString("file_id"),setOf(owner,p.getString("recipient")))
+        GroupDirectory.seed(p)
+        PayloadRules.validate(inner,p.optString("file_id"),if(ChatAddress.group(p.getString("recipient")))null else setOf(owner,p.getString("recipient")))
         return if(clearDraft)ConversationState.queueText(owner,session,JSONObject(p.toString()))else LocalData.queue(owner,JSONObject(p.toString()))
     }
     fun queue(p:JSONObject,session:String=Hub.workSession(),owner:String=Hub.workOwner()):JSONObject {val stored=enqueue(p,session,owner);kick();return pending(owner,stored)}
@@ -57,7 +58,8 @@ object Outbox {
             val uncertain=attempts>0;attempts++
             LocalData.state(owner,client,"sending",attempts,0)
             if(uncertain) {
-                val status=Hub.rawApi("GET","/api/message-status/"+android.net.Uri.encode(client),session=session,requestTag="outbox:$owner:$client")
+                val statusPath=if(ChatAddress.group(peer))"/api/groups/$peer/message-status/"else"/api/message-status/"
+                val status=Hub.rawApi("GET",statusPath+android.net.Uri.encode(client),session=session,requestTag="outbox:$owner:$client")
                 if(status.optBoolean("acknowledged")) {
                     val value=status.optJSONObject("message")?.let{ChatCrypto.incoming(it)}
                     LocalData.remove(owner,client);if(value!=null)runCatching{LocalData.put(owner,value)}
@@ -67,7 +69,9 @@ object Outbox {
             check(Hub.token==session&&Hub.me.optString("id")==owner)
             val encrypted=ChatCrypto.outgoing(p)
             check(Hub.token==session&&LocalData.outgoing(owner,client)!=null)
-            val result=ChatCrypto.incoming(Hub.rawApi("POST","/api/messages",encrypted,session,requestTag="outbox:$owner:$client"))
+            val endpoint=if(ChatAddress.group(peer))"/api/groups/$peer/messages"else"/api/messages"
+            val raw=Hub.rawApi("POST",endpoint,encrypted,session,requestTag="outbox:$owner:$client")
+            val result=if(raw.optBoolean("removed"))raw else ChatCrypto.incoming(raw)
             LocalData.remove(owner,client)
             if(Hub.token==session&&Hub.me.optString("id")==owner){runCatching{LocalData.put(owner,result)};notify(owner,session,peer,result)}
             return result
@@ -100,7 +104,7 @@ object Outbox {
         }
     }
     fun stop(){retryTask?.let{Hub.main.removeCallbacks(it)};retryTask=null}
-    fun retry(client:String){val owner=Hub.workOwner();require(Hub.token==Hub.workSession());require(LocalData.outgoing(owner,client)?.optBoolean("local_unreadable")!=true){"本机记录无法读取，请删除后重新输入"};LocalData.retry(owner,client);kick()}
+    fun retry(client:String){val owner=Hub.workOwner();require(Hub.token==Hub.workSession());val pending=LocalData.outgoing(owner,client);require(pending?.optBoolean("local_unreadable")!=true){"本机记录无法读取，请删除后重新输入"};val peer=pending?.optString("recipient").orEmpty();if(ChatAddress.group(peer)){val group=GroupDirectory.get(peer)?:throw Exception("请先打开群资料获取最新成员");require(!group.optBoolean("left"));LocalData.groupEpoch(owner,client,group.getInt("epoch"))};LocalData.retry(owner,client);kick()}
     fun cancel(client:String){val owner=Hub.workOwner();val session=Hub.workSession();require(Hub.token==session);LocalData.remove(owner,client);(Hub.http.dispatcher.runningCalls()+Hub.http.dispatcher.queuedCalls()).filter{it.request().tag()=="outbox:$owner:$client"}.forEach{it.cancel()};notify(owner,session,"")}
     fun list(owner:String,peer:String):JSONArray {val all=LocalData.pending(owner,peer);return JSONArray((0 until all.length()).map{pending(owner,all.getJSONObject(it))})}
 }

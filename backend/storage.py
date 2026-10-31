@@ -9,7 +9,7 @@ class Storage:
     async def summary(self,request):
         uid=request['uid'];row=self.c['row']
         media=row('SELECT coalesce(sum(size),0) AS bytes,count(*) AS files FROM uploads WHERE owner=?',(uid,))
-        pending=row('SELECT coalesce(sum(size),0) AS bytes,count(*) AS files FROM uploads WHERE owner=? AND NOT EXISTS(SELECT 1 FROM messages WHERE file_id=uploads.id)',(uid,))
+        pending=row('SELECT coalesce(sum(size),0) AS bytes,count(*) AS files FROM uploads WHERE owner=? AND NOT EXISTS(SELECT 1 FROM messages WHERE file_id=uploads.id) AND NOT EXISTS(SELECT 1 FROM group_messages WHERE file_id=uploads.id)',(uid,))
         avatar=row('SELECT coalesce(sum(size),0) AS bytes FROM avatars WHERE owner=?',(uid,))['bytes']
         moments=row('SELECT coalesce(sum(size),0) AS bytes FROM post_photos WHERE owner=?',(uid,))['bytes']
         day=int(time.time()//86400)
@@ -24,7 +24,7 @@ class Storage:
         uid=request['uid'];before=request.query.get('before','~')
         if len(before)>32:self.c['reject']('分页参数不正确')
         items=self.c['rows']('''SELECT id,recipient,size,created,
-            EXISTS(SELECT 1 FROM messages WHERE file_id=u.id) AS sent FROM uploads u
+            (EXISTS(SELECT 1 FROM messages WHERE file_id=u.id) OR EXISTS(SELECT 1 FROM group_messages WHERE file_id=u.id)) AS sent FROM uploads u
             WHERE owner=? AND id<? ORDER BY id DESC LIMIT 51''',(uid,before))
         return web.json_response({'files':items[:50],'next':items[49]['id'] if len(items)>50 else ''})
 
@@ -35,7 +35,7 @@ class Storage:
     async def cleanup(self,request):
         uid=request['uid'];self.c['limited']('storage-clean:'+uid,10,3600)
         # Completed but unsent uploads only. Active .part streams are never touched.
-        items=self.c['rows']('SELECT id,size FROM uploads WHERE owner=? AND NOT EXISTS(SELECT 1 FROM messages WHERE file_id=uploads.id) LIMIT 5000',(uid,))
+        items=self.c['rows']('SELECT id,size FROM uploads WHERE owner=? AND NOT EXISTS(SELECT 1 FROM messages WHERE file_id=uploads.id) AND NOT EXISTS(SELECT 1 FROM group_messages WHERE file_id=uploads.id) LIMIT 5000',(uid,))
         for item in items:self.remove(item['id'])
         return web.json_response({'ok':True,'files':len(items),'bytes':sum(x['size'] for x in items)})
 
@@ -46,9 +46,12 @@ class Storage:
         if not f:self.c['reject']('附件不存在或无权删除',404)
         with self.c['db']:
             self.c['db'].execute('DELETE FROM uploads WHERE id=?',(fid,))
-            self.c['syncstate'].bump(uid,f['recipient'])
+            if self.c['groups'].is_id(f['recipient']):
+                for member in self.c['groups'].ids(f['recipient']):self.c['syncstate'].bump(member,peer=f['recipient'])
+            else:self.c['syncstate'].bump(uid,f['recipient'])
         (self.c['DATA']/'uploads'/fid).unlink(missing_ok=True)
-        for user in (uid,f['recipient']):await self.c['emit'](user,{'event':'file.removed','id':fid})
+        people=set([uid]+self.c['groups'].ids(f['recipient'])) if self.c['groups'].is_id(f['recipient']) else (uid,f['recipient'])
+        for user in people:await self.c['emit'](user,{'event':'file.removed','id':fid})
         return web.json_response({'ok':True})
 
     def routes(self,app):

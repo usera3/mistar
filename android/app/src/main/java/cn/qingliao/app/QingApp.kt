@@ -141,6 +141,7 @@ object Hub {
         val old = token
         runCatching{ConversationState.flush(me.optString("id"),old)}
         ConversationState.clearMemory()
+        GroupDirectory.clear()
         val privateScreens=activities.keys.filter{it !is MainActivity}.toList()
         val mainScreens=activities.keys.filterIsInstance<MainActivity>().toList()
         main.post{privateScreens.forEach{if(!it.isFinishing)it.finish()}}
@@ -170,7 +171,8 @@ object Hub {
             return Outbox.send(data!!,session,owner)
         }
         if(path=="/api/contacts")try { ChatCrypto.ready() } catch(_:Exception) {}
-        return ChatCrypto.transform(rawApi(method,path,data,session)).also{result->
+        val raw=rawApi(method,path,data,session);require(token==session&&me.optString("id")==owner){"登录状态已改变"};GroupDirectory.observe(raw,owner,session)
+        return ChatCrypto.transform(raw).also{result->
             if(token==session&&owner.isNotEmpty()&&result.has("messages"))LocalHistory.messages(owner,session,result.getJSONArray("messages"),stamp)
             if(token==session&&owner.isNotEmpty()&&result.has("contacts"))LocalHistory.homePart(owner,session,"contacts",result.getJSONArray("contacts"),stamp)
             if(token==session&&owner.isNotEmpty()&&result.has("conversations"))LocalHistory.homePart(owner,session,"conversations",result.getJSONArray("conversations"),stamp)
@@ -178,7 +180,7 @@ object Hub {
     }
     fun rawApi(method: String, path: String, data: JSONObject? = null, session: String = workSession(),requestTag:Any?=null): JSONObject {
         val body = data?.toString()?.toRequestBody("application/json; charset=utf-8".toMediaType())
-        val request = Request.Builder().url(SERVER + path).header("Authorization", "Bearer $session").tag(requestTag)
+        val request = Request.Builder().url(SERVER + path).header("Authorization", "Bearer $session").header("X-Mistar-Groups","1").tag(requestTag)
             .method(method, if (method in listOf("POST", "PATCH", "PUT")) body ?: "{}".toRequestBody("application/json".toMediaType()) else null).build()
         http.newCall(request).execute().use { response ->
             val result = JSONObject(response.body?.string() ?: "{}")
@@ -299,7 +301,8 @@ object Hub {
             override fun onMessage(ws: WebSocket, text: String) {
                 if(token!=expectedToken||epoch!=connectionEpoch)return
                 try { val p = JSONObject(text)
-                    if(p.optString("event") in listOf("message","message.updated"))p.put("message",ChatCrypto.incoming(p.getJSONObject("message")))
+                    if(p.optString("event") in listOf("message","message.updated","group.message"))p.put("message",ChatCrypto.incoming(p.getJSONObject("message")))
+                    if(p.optString("event")=="group.message")p.put("event","message")
                     if(p.optString("event")=="call.signal") {
                         val active=call
                         if(active==null || active.optString("id")!=p.optString("call_id"))return
@@ -337,6 +340,7 @@ object Hub {
     }
     private fun handle(p: JSONObject) {
         when (p.optString("event")) {
+            "group.removed"->{val id=p.optString("group_id");GroupDirectory.removed(id,p.optInt("epoch"));app.getSystemService(NotificationManager::class.java).cancel(id.hashCode())}
             "app.update" -> AppUpdates.check(hint=p.optInt("version_code"))
             "error" -> if(p.optString("code") in listOf("call_busy","self_busy")) {
                 if(p.optString("invite_id")==pendingInviteId) {pendingInvitePeer="";pendingInviteId="";pendingInviteUntil=0}
@@ -353,9 +357,10 @@ object Hub {
             "message" -> {
                 val m = p.getJSONObject("message")
                 typingUntil.remove(m.optString("sender"))
-                if (m.optString("sender") != me.optString("id") && (!foreground || viewingPeer != m.optString("sender"))) {
+                val conversation=ChatAddress.peer(m,me.optString("id"))
+                if (m.optString("sender") != me.optString("id") && conversation.isNotEmpty() && (!foreground || viewingPeer != conversation)) {
                     val preview = when (m.optString("type")) { "text" -> m.optString("text"); "html" -> "[HTML 消息]"; "image" -> "[图片]"; "voice" -> "[语音]"; "file" -> "[文件]"; else -> m.optString("text") }
-                    notify("弥星", "你收到一条新消息", m.optString("sender"), false)
+                    notify("弥星", "你收到一条新消息", conversation, false)
                 }
             }
             "call.waiting", "call.ringing" -> {

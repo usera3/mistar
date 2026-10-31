@@ -119,7 +119,7 @@ object ChatCrypto {
         peers.keys.filter { it==name||it.startsWith("$name:") }.forEach{peers.remove(it)}
         peers[name]=p
     }
-    private fun peer(uid: String,requested:String=""): JSONObject {
+    private fun peer(uid: String,requested:String="",group:String=""): JSONObject {
         val me=Hub.me.getString("id");if(uid==me)return ready()
         val session=Hub.token
         val name="$me:$uid"
@@ -128,7 +128,8 @@ object ChatCrypto {
         if(historical)require(prefs.getBoolean("known:$name:$requested",false)) { "无法验证历史聊天身份" }
         val cacheName=if(historical)"$name:$requested" else name
         peers[cacheName]?.let { cached -> if(requested.isEmpty()||cached.optString("key_id")==requested)return cached }
-        val p=Hub.rawApi("GET","/api/crypto/identity/$uid"+if(requested.isNotEmpty()&&activePin!=null)"?key_id=$requested" else "",session=session)
+        val path=if(group.isNotEmpty()){require(ChatAddress.group(group));"/api/groups/$group/identities/$uid"}else"/api/crypto/identity/$uid"
+        val p=Hub.rawApi("GET",path+if(requested.isNotEmpty()&&activePin!=null)"?key_id=$requested" else "",session=session)
         if(!p.has("key_id"))throw Exception("对方需先升级 App 并登录，才能建立加密聊天")
         require(p.getString("key_id")==fingerprint(p.getString("enc"),p.getString("sig"))) { "无法验证聊天身份" }
         publicRead(p.getString("enc")); publicRead(p.getString("sig"))
@@ -164,6 +165,7 @@ object ChatCrypto {
         return JSONObject(String(bytes,utf))
     }
     fun outgoing(p: JSONObject): JSONObject {
+        if(ChatAddress.group(p.optString("recipient")))return groupOutgoing(p)
         val uid=Hub.me.getString("id");val id=p.getString("client_id");val recipient=p.getString("recipient");val fid=p.optString("file_id")
         val inner=JSONObject().put("type",p.getString("type")).put("text",p.optString("text"))
         val maximum=if(inner.getString("type")=="html")50000 else 5000
@@ -175,6 +177,7 @@ object ChatCrypto {
         return JSONObject().put("recipient",recipient).put("client_id",id).put("type","encrypted").put("envelope",encrypt(recipient,inner,context)).apply { if(fid.isNotEmpty())put("file_id",fid) }
     }
     fun incoming(m: JSONObject): JSONObject {
+        if(m.optString("group_id").isNotEmpty())return groupIncoming(m)
         if(m.optString("type")!="encrypted")return m
         val result=JSONObject(m.toString())
         for(name in listOf("type","text","file","quote","e2ee","decrypt_failed","pending","send_state","send_error","local_cache","withdrawn"))result.remove(name)
@@ -201,6 +204,73 @@ object ChatCrypto {
         if(p.has("conversations"))p.getJSONArray("conversations").let { a -> for(i in 0 until a.length()){val c=a.getJSONObject(i);c.put("last",incoming(c.getJSONObject("last")))} }
         if(p.has("messages"))p.getJSONArray("messages").let { a -> for(i in 0 until a.length())a.put(i,incoming(a.getJSONObject(i))) }
         return if(p.optString("type")=="encrypted")incoming(p) else p
+    }
+    private fun sha(bytes:ByteArray)=MessageDigest.getInstance("SHA-256").digest(bytes).joinToString(""){"%02x".format(it.toInt()and 255)}
+    private fun groupSigned(context:String,senderKey:String,manifest:List<JSONObject>):ByteArray =
+        (listOf("qingliao:group-envelope:1",context,senderKey)+manifest.map{it.getString("uid")+"|"+it.getString("key_id")+"|"+it.getString("hash")}).joinToString("\n").toByteArray(utf)
+    private fun rememberGroupKey(uid:String,p:JSONObject,session:String,me:String){
+        require(ChatAddress.person(uid)&&p.getString("key_id")==fingerprint(p.getString("enc"),p.getString("sig"))){"无法验证群成员加密身份"}
+        publicRead(p.getString("enc"));publicRead(p.getString("sig"))
+        synchronized(this){
+            require(Hub.token==session&&Hub.me.optString("id")==me){"登录状态已改变"}
+            if(uid==me){require(ready().getString("key_id")==p.getString("key_id"));return}
+            val name="$me:$uid";val pin=prefs.getString("peer:$name",null)
+            require(pin==null||pin==p.getString("key_id")){"无法建立安全的群聊连接，请检查聊天身份"}
+            if(pin==null)require(prefs.all.keys.count{it.startsWith("peer:$me:")}<2000){"本机安全联系人数量已达上限"}
+            if(peers.size>=1500)peers.keys.firstOrNull()?.let{peers.remove(it)}
+            check(prefs.edit().putString("peer:$name",p.getString("key_id")).commit());peers[name]=p
+        }
+    }
+    private fun groupOutgoing(p:JSONObject):JSONObject {
+        val gid=p.getString("recipient");val me=Hub.me.getString("id");val session=Hub.token;val self=ready()
+        val roster=Hub.rawApi("GET","/api/groups/$gid/keys",session=session);val epoch=roster.getInt("epoch")
+        if(epoch!=p.optInt("group_epoch"))throw ApiFailure(409,"群成员已变化，请打开群资料后重试这条消息")
+        val client=p.getString("client_id");require(java.util.UUID.fromString(client).toString()==client)
+        val fid=p.optString("file_id");val inner=JSONObject().put("type",p.getString("type")).put("text",p.optString("text"))
+        p.optJSONObject("private_file")?.let{inner.put("file",it)};p.optJSONObject("quote")?.let{inner.put("quote",it)}
+        PayloadRules.validate(inner,fid);val content=inner.toString().toByteArray(utf)
+        val context="qingliao:group-message:1:$gid:$epoch:$me:$client:$fid"
+        val members=roster.getJSONArray("recipients");require(members.length() in 1..20)
+        val targets=(0 until members.length()).map{members.getJSONObject(it)}.sortedBy{it.getString("id")}
+        require(targets.map{it.getString("id")}.toSet().size==targets.size&&targets.any{it.getString("id")==me})
+        val envelopes=JSONObject();val manifest=mutableListOf<JSONObject>()
+        for(target in targets){
+            val uid=target.getString("id");rememberGroupKey(uid,target,session,me)
+            val cipher=publicRead(target.getString("enc")).getPrimitive(HybridEncrypt::class.java).encrypt(content,"$context:$uid".toByteArray(utf))
+            envelopes.put(uid,JSONObject().put("recipient_key",target.getString("key_id")).put("cipher",b64(cipher)))
+            manifest.add(JSONObject().put("uid",uid).put("key_id",target.getString("key_id")).put("hash",sha(cipher)))
+        }
+        require(Hub.token==session&&Hub.me.optString("id")==me)
+        val signature=read(privateIdentity!!.getString("sig")).getPrimitive(PublicKeySign::class.java).sign(groupSigned(context,self.getString("key_id"),manifest))
+        return JSONObject().put("v",1).put("epoch",epoch).put("context",context).put("sender_key",self.getString("key_id")).put("client_id",client).put("file_id",fid).put("envelopes",envelopes).put("signature",b64(signature))
+    }
+    private fun groupIncoming(m:JSONObject):JSONObject {
+        if(m.optString("type")!="encrypted")return m
+        val result=JSONObject(m.toString());for(key in listOf("type","text","file","quote","e2ee","decrypt_failed","pending","send_state","send_error","local_cache","withdrawn"))result.remove(key)
+        try{
+            val gid=m.getString("group_id");val me=Hub.me.getString("id");val sender=m.getString("sender");val epoch=m.getInt("group_epoch")
+            require(ChatAddress.group(gid)&&ChatAddress.person(sender)&&m.getString("recipient")==me&&epoch>0)
+            val client=m.getString("client_id");require(java.util.UUID.fromString(client).toString()==client)
+            val fid=if(m.isNull("file_id"))""else m.optString("file_id");val context="qingliao:group-message:1:$gid:$epoch:$sender:$client:$fid"
+            val e=m.getJSONObject("envelope");require(e.getInt("v")==1&&e.getString("context")==context)
+            require(e.getString("cipher").length in 8..400000&&e.getString("signature").length in 8..8192)
+            val manifest=e.getJSONArray("manifest");require(manifest.length() in 1..20)
+            val entries=(0 until manifest.length()).map{manifest.getJSONObject(it)};val ids=entries.map{it.getString("uid")}
+            require(ids==ids.sorted()&&ids.toSet().size==ids.size&&ids.all{ChatAddress.person(it)}&&me in ids&&sender in ids)
+            for(entry in entries){require(entry.keys().asSequence().toSet()==setOf("uid","key_id","hash"));require(entry.getString("key_id").matches(Regex("[a-f0-9]{64}"))&&entry.getString("hash").matches(Regex("[a-f0-9]{64}")))}
+            val self=ready();val from=peer(sender,e.getString("sender_key"),gid)
+            require(from.getString("key_id")==e.getString("sender_key")&&entries.first{it.getString("uid")==sender}.getString("key_id")==from.getString("key_id"))
+            val mine=entries.first{it.getString("uid")==me};require(e.getString("recipient_key")==self.getString("key_id")&&mine.getString("key_id")==self.getString("key_id"))
+            val cipher=un64(e.getString("cipher"));require(cipher.size in 1..300000&&sha(cipher)==mine.getString("hash"))
+            publicRead(from.getString("sig")).getPrimitive(PublicKeyVerify::class.java).verify(un64(e.getString("signature")),groupSigned(context,e.getString("sender_key"),entries))
+            val bytes=read(privateIdentity!!.getString("enc")).getPrimitive(HybridDecrypt::class.java).decrypt(cipher,"$context:$me".toByteArray(utf))
+            val inner=JSONObject(String(bytes,utf));PayloadRules.validate(inner,fid)
+            result.put("type",inner.getString("type")).put("text",inner.optString("text")).put("e2ee",true)
+            result.put("group_recipients",JSONArray(ids))
+            inner.optJSONObject("quote")?.let{result.put("quote",it)}
+            if(fid.isNotEmpty())result.put("file",inner.getJSONObject("file").put("available",m.optBoolean("attachment_available",true)))
+        }catch(_:Exception){result.put("type","text").put("text","[加密群消息暂时无法读取，请检查聊天身份]").put("decrypt_failed",true);result.remove("file");result.remove("quote")}
+        result.remove("envelope");return result
     }
     fun sealSignal(p: JSONObject,call: JSONObject): JSONObject {
         val me=Hub.me.getString("id");val other=if(call.getString("caller")==me)call.getString("callee") else call.getString("caller")
@@ -238,7 +308,7 @@ object ChatCrypto {
         return try { SecretKeySpec(SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(spec).encoded,"AES") } finally { spec.clearPassword() }
     }
     @Synchronized fun importIdentity(text: String,passphrase: String) {
-        require(text.toByteArray(utf).size<=512*1024) { "备份文件过大" }
+        require(text.toByteArray(utf).size<=1024*1024) { "备份文件过大" }
         val p=JSONObject(text);val uid=Hub.me.getString("id")
         val session=Hub.token
         require(p.getInt("v") in 1..2 && p.getString("uid")==uid) { "请选择此账号的聊天身份备份" }
@@ -250,7 +320,7 @@ object ChatCrypto {
         require(Hub.token==session && Hub.me.optString("id")==uid) { "登录状态已改变" }
         val pins=identity.optJSONObject("pins")
         val known=identity.optJSONObject("known")
-        require((pins?.length()?:0)<=500&&(known?.length()?:0)<=5000) { "备份中的联系人过多" }
+        require((pins?.length()?:0)<=3000&&(known?.length()?:0)<=5000) { "备份中的联系人过多" }
         val history=mutableListOf<String>()
         known?.keys()?.forEach { name -> require(name.matches(Regex("[0-9]{8}:[0-9a-f]{64}"))&&known.get(name)==true);history.add(name) }
         val restored=mutableMapOf<String,String>()

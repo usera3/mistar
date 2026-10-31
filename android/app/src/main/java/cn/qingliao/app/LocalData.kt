@@ -50,7 +50,7 @@ object LocalData {
     private fun number(sql:String,vararg values:String):Long=db.rawQuery(sql,values).use{if(it.moveToFirst())it.getLong(0)else 0L}
     @Synchronized fun put(owner:String,message:JSONObject,stamp:Long=epoch(owner)) {
         scope(owner);if(stamp!=epoch(owner)||message.optBoolean("pending")||message.optBoolean("removed"))return
-        val id=message.getString("id");val peer=if(message.optString("sender")==owner)message.getString("recipient")else message.getString("sender")
+        val id=message.getString("id");val peer=ChatAddress.peer(message,owner);require(ChatAddress.valid(peer))
         if(message.optBoolean("withdrawn"))db.execSQL("DELETE FROM voice_text WHERE owner=? AND mid=?",arrayOf(owner,id))
         if(number("SELECT count(*) FROM hidden WHERE owner=? AND mid=?",owner,id)>0)return
         if(message.optLong("created")<=number("SELECT through FROM clears WHERE owner=? AND peer=?",owner,peer))return
@@ -69,7 +69,7 @@ object LocalData {
         return JSONArray(items.reversed())
     }
     @Synchronized fun searchMessages(owner:String,query:String,peer:String=""):JSONArray {
-        scope(owner);require(query.isNotBlank()&&query.length<=80);require(peer.isEmpty()||peer.matches(Regex("[0-9]{8}")))
+        scope(owner);require(query.isNotBlank()&&query.length<=80);require(peer.isEmpty()||ChatAddress.valid(peer))
         val result=JSONArray()
         val sql="SELECT mid,peer,body FROM cache WHERE owner=?"+(if(peer.isEmpty())""else" AND peer=?")+" ORDER BY created DESC LIMIT 1000"
         db.rawQuery(sql,if(peer.isEmpty())arrayOf(owner)else arrayOf(owner,peer)).use{c->while(c.moveToNext()&&result.length()<50){
@@ -114,7 +114,7 @@ object LocalData {
     @Synchronized fun historyBytes(owner:String):Long {scope(owner);return number("SELECT coalesce(sum(n),0) FROM cache WHERE owner=?",owner)+number("SELECT coalesce(sum(n),0) FROM voice_text WHERE owner=?",owner)}
     @Synchronized fun resetIdentity(owner:String){scope(owner);changed(owner);for(table in listOf("cache","outbox","versions","hidden","clears","file_flags","home","voice_text"))db.execSQL("DELETE FROM $table WHERE owner=?",arrayOf(owner))}
     @Synchronized fun chatState(owner:String,peer:String):JSONObject {
-        scope(owner);require(peer.matches(Regex("[0-9]{8}")))
+        scope(owner);require(ChatAddress.valid(peer))
         return db.rawQuery("SELECT body FROM chat_state WHERE owner=? AND peer=?",arrayOf(owner,peer)).use{if(it.moveToFirst())open(owner,"chat_state",peer,it.getBlob(0))else JSONObject()}
     }
     @Synchronized fun chatStates(owner:String):JSONObject {
@@ -123,7 +123,7 @@ object LocalData {
         return result
     }
     @Synchronized fun saveChatState(owner:String,peer:String,value:JSONObject) {
-        scope(owner);require(peer.matches(Regex("[0-9]{8}")))
+        scope(owner);require(ChatAddress.valid(peer))
         require(value.optString("draft").length<=5000&&value.optJSONObject("quote")?.toString().orEmpty().length<=1024)
         if(value.optString("draft").isEmpty()&&!value.has("quote")&&!value.optBoolean("muted")&&value.optLong("pinned_at")==0L){db.execSQL("DELETE FROM chat_state WHERE owner=? AND peer=?",arrayOf(owner,peer));return}
         val bytes=seal(owner,"chat_state",peer,value);require(bytes.size<=24*1024)
@@ -143,7 +143,7 @@ object LocalData {
     @Synchronized fun putVoiceText(owner:String,peer:String,message:JSONObject,value:String,stamp:Long) {
         scope(owner);check(stamp==epoch(owner)){"聊天记录已改变，请重新转文字"}
         val id=message.getString("id");val fid=message.getJSONObject("file").getString("id")
-        require(if(message.optString("sender")==owner)message.optString("recipient")==peer else message.optString("recipient")==owner&&message.optString("sender")==peer)
+        require(ChatAddress.peer(message,owner)==peer&&(message.optString("sender")==owner||message.optString("recipient")==owner))
         require(value.isNotBlank()&&value.length<=5000&&message.optString("type")=="voice"&&!message.optBoolean("pending")&&!message.optBoolean("withdrawn")&&!message.optBoolean("decrypt_failed"))
         require(message.optBoolean("attachment_available",true)&&message.getJSONObject("file").optBoolean("available",true)&&fid.matches(Regex("[a-f0-9]{32}")))
         check(number("SELECT count(*) FROM hidden WHERE owner=? AND mid=?",owner,id)==0L&&number("SELECT count(*) FROM file_flags WHERE owner=? AND fid=?",owner,fid)==0L)
@@ -160,7 +160,7 @@ object LocalData {
         scope(owner);val value=home(owner)
         val items=if(key=="contacts")array else JSONArray((0 until minOf(array.length(),100)).map{i->
             val c=array.getJSONObject(i);val m=c.getJSONObject("last")
-            JSONObject().put("user",c.getJSONObject("user")).put("unread",c.optInt("unread")).put("last",JSONObject().put("type",m.optString("type")).put("text",if(m.optString("type")=="html")"" else m.optString("text").take(160)).put("created",m.optLong("created")).apply{m.optJSONObject("file")?.let{put("file",JSONObject().put("name",it.optString("name").take(80)))}})
+            JSONObject().put("user",c.getJSONObject("user")).put("unread",c.optInt("unread")).put("last",JSONObject().put("type",m.optString("type")).put("text",if(m.optString("type")=="html")"" else m.optString("text").take(160)).put("created",m.optLong("created")).apply{for(key in listOf("id","sender","recipient","group_id","group_epoch","sender_user"))if(m.has(key))put(key,m.get(key));m.optJSONObject("file")?.let{put("file",JSONObject().put("name",it.optString("name").take(80)))}})
         })
         value.put(key,items);val bytes=seal(owner,"home",owner,value);if(bytes.size>512*1024)return
         db.execSQL("INSERT OR REPLACE INTO home VALUES(?,?,?)",arrayOf(owner,bytes,System.currentTimeMillis()));db.execSQL("DELETE FROM home WHERE rowid IN (SELECT rowid FROM home ORDER BY created DESC LIMIT -1 OFFSET 10)")
@@ -206,4 +206,10 @@ object LocalData {
     }
     @Synchronized fun remove(owner:String,client:String){db.execSQL("DELETE FROM outbox WHERE owner=? AND client=?",arrayOf(owner,client))}
     @Synchronized fun retry(owner:String,client:String){scope(owner);db.execSQL("UPDATE outbox SET state='queued',attempts=0,next=0,created=? WHERE owner=? AND client=?",arrayOf(System.currentTimeMillis(),owner,client))}
+    @Synchronized fun groupEpoch(owner:String,client:String,epoch:Int){
+        scope(owner);require(epoch>0);val p=outgoing(owner,client)?:return;require(ChatAddress.group(p.optString("recipient"))&&!p.optBoolean("local_unreadable"))
+        p.put("group_epoch",epoch);p.keys().asSequence().filter{it.startsWith("local_")}.toList().forEach{p.remove(it)}
+        val bytes=seal(owner,"outbox",client,p);require(bytes.size<=256*1024)
+        db.execSQL("UPDATE outbox SET body=?,n=? WHERE owner=? AND client=?",arrayOf(bytes,bytes.size,owner,client))
+    }
 }

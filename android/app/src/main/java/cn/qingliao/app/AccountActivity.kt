@@ -151,7 +151,7 @@ class AccountActivity:Activity() {
         if(requestCode==72){val password=importPassword;importPassword="";work({
             val text=contentResolver.openInputStream(uri)?.use { input ->
                 val out=java.io.ByteArrayOutputStream();val bytes=ByteArray(4096)
-                while(true){val n=input.read(bytes);if(n<0)break;require(out.size()+n<=512*1024) { "备份文件过大" };out.write(bytes,0,n)};out.toString("UTF-8")
+                while(true){val n=input.read(bytes);if(n<0)break;require(out.size()+n<=1024*1024) { "备份文件过大" };out.write(bytes,0,n)};out.toString("UTF-8")
             } ?: throw Exception("无法读取备份")
             try{ChatCrypto.importIdentity(text,password)}catch(_:Exception){throw Exception("无法导入，请检查账号、备份文件和迁移口令")};JSONObject()
         },{status.text="聊天身份已导入，返回聊天即可使用"})}

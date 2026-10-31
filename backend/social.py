@@ -128,6 +128,7 @@ class Social:
 
     def file_gc(self,fid):
         if not fid or self.c['row']('SELECT 1 FROM messages WHERE file_id=? LIMIT 1',(fid,)):return
+        if 'groups' in self.c and self.c['row']('SELECT 1 FROM group_messages WHERE file_id=? LIMIT 1',(fid,)):return
         (self.c['DATA']/'uploads'/fid).unlink(missing_ok=True)
         self.c['write']('DELETE FROM uploads WHERE id=?',(fid,))
 
