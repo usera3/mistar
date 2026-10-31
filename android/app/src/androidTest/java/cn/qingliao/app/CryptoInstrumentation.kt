@@ -22,6 +22,7 @@ class CryptoInstrumentation:Instrumentation() {
     override fun onStart() {
         try {
             waitForIdleSync()
+            if(mode=="location"){val result=LocationTests.run(this,peer);finish(Activity.RESULT_OK,Bundle().apply{putString("result",result)});return}
             if(mode=="groups"){val result=GroupsTests.run(this,peer);finish(Activity.RESULT_OK,Bundle().apply{putString("result",result)});return}
             if(mode=="codeLogin"){val result=CodeLoginTests.run(this,peer);finish(Activity.RESULT_OK,Bundle().apply{putString("result",result)});return}
             if(mode=="visual"){val result=VisualTests.run(this,peer);finish(Activity.RESULT_OK,Bundle().apply{putString("result",result)});return}

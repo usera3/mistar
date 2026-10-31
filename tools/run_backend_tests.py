@@ -6,7 +6,7 @@ import sys
 import tempfile
 
 root=Path(__file__).resolve().parents[1]
-tests=['groups','code_login','password_reset','membership','releases','moderation','moderation_media','plaza_closed','backend','security','abuse','avatar','presence','html','moments','momentmedia','boundaries','recovery','social','storage','syncstate','callstate','bots','botcalls']
+tests=['locations','groups','code_login','password_reset','membership','releases','moderation','moderation_media','plaza_closed','backend','security','abuse','avatar','presence','html','moments','momentmedia','boundaries','recovery','social','storage','syncstate','callstate','bots','botcalls']
 failed=[]
 for name in tests:
     # Suites that exercise public/friend ACLs need an explicitly enabled isolated
@@ -20,4 +20,4 @@ for name in tests:
         failed.append(name);print((p.stdout+p.stderr)[-6000:])
 if failed:raise SystemExit('Failed suites: '+', '.join(failed))
 subprocess.run([sys.executable,'test_example.py'],cwd=root/'bot-examples',check=True)
-print('PASS all 24 backend suites and isolated bot example')
+print('PASS all 25 backend suites and isolated bot example')

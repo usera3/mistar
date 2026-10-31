@@ -101,6 +101,16 @@ internal object GroupsTests {
             for(suffix in listOf("","-wal")){val file=File(i.targetContext.getDatabasePath("chat-local.sqlite").path+suffix);if(file.exists())check(!String(file.readBytes(),Charsets.ISO_8859_1).contains(marker))};checks++
             val incoming=fromPeer(unit,bob,JSONObject().put("type","text").put("text","真实签名与多成员密文验证"));val message=dto(unit,bob,incoming)
             check(ChatCrypto.incoming(message).getString("text")=="真实签名与多成员密文验证");checks++
+            val location=LocationPayload.from(android.location.Location("synthetic").apply{latitude=35.7;longitude=139.7;accuracy=10f;time=System.currentTimeMillis()},false)
+            val staticWire=ChatCrypto.outgoing(LocationPayload.packet(location,unit).put("group_epoch",1));check(!staticWire.toString().contains("35.7")&&ChatCrypto.incoming(dto(unit,owner,staticWire)).getJSONObject("location").getDouble("lat")==35.7);checks++
+            val share=JSONObject().put("id",UUID.randomUUID().toString()).put("owner",owner).put("peer",unit).put("epoch",1).put("until",System.currentTimeMillis()+3600000)
+            val liveLocation=JSONObject(location.toString()).put("live_id",share.getString("id")).put("until",share.getLong("until"));val liveWire=ChatCrypto.sealLocation(share,1,liveLocation)
+            val liveEnvelope=dto(unit,owner,JSONObject(liveWire.toString()).put("client_id",UUID.randomUUID().toString()).put("epoch",1)).getJSONObject("envelope")
+            val liveUpdate=JSONObject().put("sender",owner).put("recipient",owner).put("peer",unit).put("epoch",1).put("share_id",share.getString("id")).put("seq",1).put("until",share.getLong("until")).put("envelope",liveEnvelope)
+            check(ChatCrypto.openLocation(liveUpdate).getJSONObject("location").getDouble("lon")==139.7);checks++
+            val liveContext="qingliao:location:1:${share.getString("id")}:1:$owner:$unit:1"
+            val bobLocation=enc[bob]!!.getPrimitive(HybridDecrypt::class.java).decrypt(un64(liveWire.getJSONObject("envelopes").getJSONObject(bob).getString("cipher")),"$liveContext:$bob".toByteArray());check(JSONObject(String(bobLocation)).getJSONObject("location").getDouble("lat")==35.7);checks++
+            check(runCatching{ChatCrypto.openLocation(JSONObject(liveUpdate.toString()).put("seq",2))}.isFailure);checks++
             val bad=mutableListOf<JSONObject>()
             bad.add(JSONObject(message.toString()).put("group_epoch",2));bad.add(JSONObject(message.toString()).put("recipient",carl));bad.add(JSONObject(message.toString()).apply{getJSONObject("envelope").put("signature",ChatCrypto.b64(ByteArray(80){1}))})
             bad.add(JSONObject(message.toString()).apply{val e=getJSONObject("envelope");val bytes=un64(e.getString("cipher"));bytes[bytes.lastIndex]=(bytes.last().toInt()xor 1).toByte();e.put("cipher",ChatCrypto.b64(bytes))})

@@ -141,6 +141,7 @@ object Hub {
         val old = token
         runCatching{ConversationState.flush(me.optString("id"),old)}
         ConversationState.clearMemory()
+        LocationShareService.instance?.end();LocationSessions.clear()
         GroupDirectory.clear()
         val privateScreens=activities.keys.filter{it !is MainActivity}.toList()
         val mainScreens=activities.keys.filterIsInstance<MainActivity>().toList()
@@ -303,6 +304,9 @@ object Hub {
                 try { val p = JSONObject(text)
                     if(p.optString("event") in listOf("message","message.updated","group.message"))p.put("message",ChatCrypto.incoming(p.getJSONObject("message")))
                     if(p.optString("event")=="group.message")p.put("event","message")
+                    if(p.optString("event")=="location.live"){
+                        LocationSessions.accept(p.getJSONObject("update"),expectedToken,me.optString("id"));return
+                    }
                     if(p.optString("event")=="call.signal") {
                         val active=call
                         if(active==null || active.optString("id")!=p.optString("call_id"))return
@@ -327,7 +331,7 @@ object Hub {
     private fun lost(ws: WebSocket, expected: String, code: Int) {
         if (token != expected || socket !== ws) return
         authDeadline?.let{main.removeCallbacks(it)};authDeadline=null
-        socket = null; connected = false; typingUntil.clear()
+        socket = null; connected = false; typingUntil.clear();LocationSessions.disconnected()
         if(call!=null)markCallReconnecting()
         emit(JSONObject().put("event", "connection"))
         if (code == 1008) { logout(); emit(JSONObject().put("event", "expired")); return }
@@ -340,6 +344,7 @@ object Hub {
     }
     private fun handle(p: JSONObject) {
         when (p.optString("event")) {
+            "location.closed"->LocationSessions.close(p.optString("share_id"))
             "group.removed"->{val id=p.optString("group_id");GroupDirectory.removed(id,p.optInt("epoch"));app.getSystemService(NotificationManager::class.java).cancel(id.hashCode())}
             "app.update" -> AppUpdates.check(hint=p.optInt("version_code"))
             "error" -> if(p.optString("code") in listOf("call_busy","self_busy")) {

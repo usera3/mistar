@@ -17,6 +17,7 @@ object PayloadRules {
             require(quote.getString("type") in listOf("text","html","image","voice","file"))
         }
         require(!inner.has("quote")||inner.optJSONObject("quote")!=null){"引用格式不正确"}
+        if(inner.has("location")){require(kind=="text"&&inner.optJSONObject("location")!=null);LocationPayload.validate(inner.getJSONObject("location"));require(text==LocationPayload.text(inner.getJSONObject("location"))){"位置描述不一致"}}
         if(kind in listOf("text","html")) {
             require(fid.isEmpty()&&!inner.has("file")) { "文字消息不应包含附件" };return
         }

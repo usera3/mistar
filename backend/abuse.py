@@ -161,6 +161,7 @@ class Defense:
         limit=32*1024
         if request.path in ('/api/messages','/api/bot/messages'):limit=900000
         elif re.fullmatch(r'/api/groups/g_[a-f0-9]{32}/messages',request.path):limit=6*1024*1024
+        elif re.fullmatch(r'/api/locations/[a-f0-9-]{36}',request.path):limit=128*1024
         elif re.fullmatch(r'/api/bot/calls/[a-f0-9-]{36}/signal',request.path):limit=300000
         elif request.path=='/api/uploads':limit=self.c['MAX_FILE']+65536
         elif request.path=='/api/bot/uploads':limit=self.c['MAX_FILE']

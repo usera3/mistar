@@ -245,7 +245,7 @@ async def authentication(request, handler):
 def public_plaza_open(): return os.environ.get('QINGLIAO_PUBLIC_PLAZA', '0') == '1'
 
 
-async def health(request): return web.json_response({'ok': True, 'app': 'qingliao', 'version': '1.23.0', 'groups':True, 'group_e2ee':'manifest-v1', 'email_code_login':True, 'password_reset_email_only':True, 'app_updates':True, 'membership':True,'moderation': True, 'require_email': security.require_email, 'require_e2ee': security.require_e2ee, 'bot_api': 'webhook-v1', 'bot_calls':True,'moments_media':True,'moments_public':public_plaza_open(),'moments_video_covers':True,'bot_calls_default_allowed':True,'call_busy_feedback':True})
+async def health(request): return web.json_response({'ok': True, 'app': 'qingliao', 'version': '1.24.0', 'live_location':'encrypted-v1', 'groups':True, 'group_e2ee':'manifest-v1', 'email_code_login':True, 'password_reset_email_only':True, 'app_updates':True, 'membership':True,'moderation': True, 'require_email': security.require_email, 'require_e2ee': security.require_e2ee, 'bot_api': 'webhook-v1', 'bot_calls':True,'moments_media':True,'moments_public':public_plaza_open(),'moments_video_covers':True,'bot_calls_default_allowed':True,'call_busy_feedback':True})
 
 
 async def register(request):
@@ -981,6 +981,7 @@ async def maintenance(app):
         t = time.monotonic()
         await callstate.tick()
         await botcalls.tick()
+        await locations.tick()
         for (uid, peer), sockets in list(typing.items()):
             for ws, expires in list(sockets.items()):
                 if expires <= t:
@@ -1061,6 +1062,8 @@ from membership import Membership
 membership=Membership(globals())
 from groups import Groups
 groups=Groups(globals())
+from locations import Locations
+locations=Locations(globals())
 guard.migrate_emails()
 guard.reap()
 last_message_time = row('SELECT coalesce(max(created),0) AS n FROM messages')['n']
@@ -1076,6 +1079,7 @@ syncstate.routes(app)
 social.routes(app)
 storage.routes(app)
 groups.routes(app)
+locations.routes(app)
 app.cleanup_ctx.append(lifecycle)
 bots.routes(app)
 botcalls.routes(app)

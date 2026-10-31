@@ -65,6 +65,8 @@ class MainActivity : Activity() {
     private var actionSheet: Dialog? = null
     private var messageMenu:MessageActionMenu?=null
     private val messageBubbles=mutableMapOf<String,View>()
+    private var locationSession="";private var locationOwner="";private var locationPeer=""
+    private val locationCards=mutableListOf<LocationCardView>()
     private val messageTextViews=mutableMapOf<String,MessageTextView>()
     private var textActionMode:ActionMode?=null
     private var textSelectionMessage=""
@@ -231,7 +233,7 @@ class MainActivity : Activity() {
     }
     private val tick = object : Runnable {
         override fun run() {
-            updateStatusLabels()
+            updateStatusLabels();locationCards.forEach{it.update()}
             if (Hub.call != null) callClock?.let { label ->
                 val value=callClockText()
                 if(label.text.toString()!=value)label.text=value
@@ -346,7 +348,7 @@ class MainActivity : Activity() {
         videoEdge=fullVideo;WindowCompat.setDecorFitsSystemWindows(window,!fullVideo)
         stashDraft();composerPeer="";inputPanel?.hide();inputPanel=null;inputRowView=null;recorderButton=null;voiceDraftRow=null;voiceDraftPlay=null;voiceDraftCaption=null;voiceDraftIcon="";voiceViews.clear();conversationMenu?.dismiss();conversationMenu=null
         authScreen?.dispose();authScreen=null
-        finishTextSelection();messageTextViews.clear()
+        finishTextSelection();messageTextViews.clear();locationCards.clear()
         messageMenu?.dismiss();messageMenu=null;messageBubbles.clear();selectionChecks.clear();selectedMessages.clear();selecting=false;selectionHeader=null;selectionFooter=null;composerPanel=null
         forwardJob?.cancel();forwardJob=null;forwardDialog?.dismiss();forwardDialog=null;batchDeleteCancel?.invoke();batchDeleteCancel=null
         dictation?.cancel();dictation=null
@@ -1155,6 +1157,7 @@ class MainActivity : Activity() {
         },listOf(
             ChatInputPanel.Action("image","图片"){pickFile("image")},
             ChatInputPanel.Action("file","文件"){pickFile("file")},
+            ChatInputPanel.Action("location","位置"){shareLocation()},
             ChatInputPanel.Action("mic","录制语音",{Hub.call==null&&recording==null}){startRecordingScoped()},
             ChatInputPanel.Action("dictate","语音输入",{Hub.call==null&&recording==null}){startDictation()},
             ChatInputPanel.Action("code","HTML 卡片"){htmlEditor()},
@@ -1184,6 +1187,18 @@ class MainActivity : Activity() {
         hideKeyboard();stopTyping();actionSheet?.dismiss();inputPanel?.toggle(mode)
     }
     private fun sendMenu(){toggleInputPanel("more")}
+    private fun shareLocation(){
+        if(!contactGuard())return
+        locationPeer=peer?.optString("id")?:return;locationOwner=Hub.me.optString("id");locationSession=Hub.token
+        hideKeyboard();stopTyping();inputPanel?.hide()
+        startActivityForResult(Intent(this,LocationActivity::class.java).putExtra("peer",locationPeer),86)
+    }
+    private fun viewLocation(m:JSONObject){
+        val value=m.optJSONObject("location")?:return;val target=peer?.optString("id")?:return
+        if(!resumed||!Hub.foreground||Hub.token.isEmpty())return
+        startActivity(Intent(this,LocationActivity::class.java).putExtra("peer",target).putExtra("sender",m.optString("sender")).putExtra("location",value.toString()).apply{if(value.has("live_id"))putExtra("live",value.getString("live_id"))})
+    }
+
     private fun startRecordingScoped(){
         if(!contactGuard()||Hub.call!=null){if(Hub.call!=null)toast("通话中暂不能录制语音");return}
         val session=Hub.token;val owner=Hub.me.optString("id");val target=peer?.optString("id");val editor=composer
@@ -1266,7 +1281,7 @@ class MainActivity : Activity() {
         }, { if(generation==chatGeneration&&session==Hub.token)toast(it) })
     }
     private fun renderMessages(scroll: Boolean = true,older: Boolean=false) {
-        finishTextSelection();messageTextViews.clear()
+        finishTextSelection();messageTextViews.clear();locationCards.clear()
         messageMenu?.dismiss();messageBubbles.clear();selectionChecks.clear()
         val parent=messageList ?: return
         val viewport=messageScroll ?: return
@@ -1316,6 +1331,8 @@ class MainActivity : Activity() {
         }
         if(!m.optBoolean("attachment_available",true)&&m.optString("type") in listOf("image","file","voice")) {
             bubble.addView(text("云端附件已被删除",14f,bubbleMuted).apply{this.maxWidth=maxWidth})
+        } else if(m.optJSONObject("location")!=null&&(m.optBoolean("e2ee")||m.optBoolean("pending"))&&!m.optBoolean("decrypt_failed")){
+            val card=LocationCardView(this,palette,m.getJSONObject("location"),mine,maxWidth){viewLocation(m)};locationCards.add(card);bubble.addView(card)
         } else when(m.optString("type")) {
             "text" -> bubble.addView(if(m.optBoolean("decrypt_failed")||m.optBoolean("pending"))text(m.optString("text"),if(compact)14f else 16f,bubbleInk).apply{this.maxWidth=maxWidth}else selectableMessageText(m,if(compact)14f else 16f,bubbleInk,maxWidth))
             "html" -> {
@@ -1536,6 +1553,12 @@ class MainActivity : Activity() {
     @Deprecated("Android result API")
     override fun onActivityResult(code: Int,result: Int,data: Intent?) {
         super.onActivityResult(code,result,data)
+        if(code==86){
+            if(result==RESULT_OK&&Hub.token==locationSession&&Hub.me.optString("id")==locationOwner){
+                data?.getStringExtra("message")?.let{runCatching{JSONObject(it)}.getOrNull()?.let{m->if(peer?.optString("id")==locationPeer)appendMessage(m)}}
+                refresh()
+            };locationSession="";locationOwner="";locationPeer="";return
+        }
         if(code==85){
             if(result==RESULT_OK&&Hub.token==groupSession&&Hub.me.optString("id")==groupOwner){
                 val left=data?.getStringExtra("left").orEmpty()

@@ -20,11 +20,11 @@ object Outbox {
     fun pending(owner:String,p:JSONObject):JSONObject = JSONObject().put("id","local:"+p.getString("client_id")).put("client_id",p.getString("client_id"))
         .put("sender",owner).put("recipient",p.getString("recipient")).put("type",p.getString("type")).put("text",p.optString("text"))
         .put("created",p.optLong("local_created",System.currentTimeMillis())).put("pending",true).put("send_state",p.optString("local_state","queued"))
-        .put("send_error",p.optString("local_error")).apply{if(ChatAddress.group(p.optString("recipient")))put("group_id",p.getString("recipient"));p.optJSONObject("private_file")?.let{put("file",it);put("file_id",it.optString("id"))};p.optJSONObject("quote")?.let{put("quote",it)}}
+        .put("send_error",p.optString("local_error")).apply{if(ChatAddress.group(p.optString("recipient")))put("group_id",p.getString("recipient"));p.optJSONObject("private_file")?.let{put("file",it);put("file_id",it.optString("id"))};p.optJSONObject("quote")?.let{put("quote",it)};p.optJSONObject("location")?.let{put("location",it)}}
     private fun enqueue(p:JSONObject,session:String,owner:String,clearDraft:Boolean=false):JSONObject {
         require(Hub.token==session&&Hub.me.optString("id")==owner){"登录状态已改变"}
         val inner=JSONObject().put("type",p.getString("type")).put("text",p.optString("text"));p.optJSONObject("private_file")?.let{inner.put("file",it)}
-        p.optJSONObject("quote")?.let{inner.put("quote",it)}
+        p.optJSONObject("quote")?.let{inner.put("quote",it)};p.optJSONObject("location")?.let{inner.put("location",it)}
         GroupDirectory.seed(p)
         PayloadRules.validate(inner,p.optString("file_id"),if(ChatAddress.group(p.getString("recipient")))null else setOf(owner,p.getString("recipient")))
         return if(clearDraft)ConversationState.queueText(owner,session,JSONObject(p.toString()))else LocalData.queue(owner,JSONObject(p.toString()))
@@ -52,7 +52,7 @@ object Outbox {
         try {
             if(Hub.token!=session||Hub.me.optString("id")!=owner||!online())return null
             if(p.optBoolean("local_unreadable")){LocalData.state(owner,client,"blocked",attempts,0,"本机记录无法读取，请删除后重新输入");notify(owner,session,peer);return null}
-            if(System.currentTimeMillis()-p.optLong("local_created")>7*86400000L){LocalData.state(owner,client,"blocked",attempts,0,"消息等待时间较长，请确认后重试");notify(owner,session,peer);return null}
+            if(p.optJSONObject("location")?.let{System.currentTimeMillis()-it.optLong("at")>15*60000L}==true||System.currentTimeMillis()-p.optLong("local_created")>7*86400000L){LocalData.state(owner,client,"blocked",attempts,0,"消息等待时间较长，请确认后重试");notify(owner,session,peer);return null}
             if(attempts>=5){LocalData.state(owner,client,"blocked",attempts,0,"暂时未能发送，请确认后重试");notify(owner,session,peer);return null}
             if(LocalData.outgoing(owner,client)==null)return null
             val uncertain=attempts>0;attempts++

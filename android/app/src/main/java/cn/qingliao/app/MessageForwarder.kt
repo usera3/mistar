@@ -38,6 +38,7 @@ class MessageForwarder(private val activity:Activity,items:List<JSONObject>,priv
         val item=snapshots[completed];progress(completed,snapshots.size,if(item.has("file"))"正在准备附件"else"正在保存待发消息")
         if(item.optString("type") in setOf("text","html")){
             val p=JSONObject().put("recipient",recipient).put("type",item.getString("type")).put("text",item.optString("text")).put("client_id",UUID.randomUUID().toString())
+            item.optJSONObject("location")?.let{original->val snapshot=JSONObject(original.toString());snapshot.remove("live_id");snapshot.remove("until");p.put("location",snapshot).put("text",LocationPayload.text(snapshot))}
             // Queue persistence and encryption are shared with ordinary user-initiated sending.
             LocalData.worker.execute{try{
                 synchronized(commitLock){check(allowed());Outbox.queue(p,session,owner);completed++}

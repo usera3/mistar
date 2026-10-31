@@ -13,6 +13,7 @@
 
 - **聊天**：文字、HTML 排版卡片、图片、语音和最大 25 MiB 文件；左右头像、输入状态、最近在线、未读与已读。
 - **好友群聊**：右上角“＋”选择好友创建2至20人加密群，支持文字、图片、语音、文件、HTML和成员管理；新成员无此前消息/文件权限，详见 [群聊说明](GROUPS.md)。
+- **位置分享**：聊天“＋”预览后发送一次位置，或向普通好友/好友群开启实时共享；位置加密、时间/精度可见、通知栏可停止。支持打开外部地图，详见 [位置分享](LOCATION_SHARING.md)。
 - **会话与草稿**：本机加密草稿（文字、引用、光标）、置顶、消息免打扰与连续消息列表；仅搜索本机保存的联系人、文字和文件名，支持定位上下文。
 - **消息操作**：深灰双排长按浮层、原生文字选区及部分复制、引用、删除/撤回、多选、批量删除和逐条转发；转发附件重新加密。
 - **输入与语音**：功能/表情抽屉、向右滑动引用；语音暂停续播、拖动与1/1.5/2倍速；录音试听、手动发送及当前页面失败重试，60秒上限不会自动发送。
@@ -28,6 +29,8 @@
 - **会员与支付**：月卡/季卡/年卡，支付宝付款、本人订单、到账后开通与续费；500MiB存储、每日256MiB上传及会员头像框。非自动续费，详见 [MEMBERSHIP.md](MEMBERSHIP.md)。
 
 <p><img src="docs/images/login.png" width="230" alt="手机登录界面"> <img src="docs/images/watch-login.png" width="230" alt="Android 9 手表登录界面"></p>
+
+<p><img src="docs/images/location-preview.png" width="230" alt="合成坐标的位置预览"> <img src="docs/images/location-detail.png" width="230" alt="位置快照与地图入口"> <img src="docs/images/live-location.png" width="230" alt="实时位置状态与停止共享"></p>
 
 <p><img src="docs/images/conversations.png" width="230" alt="新版平铺消息首页"> <img src="docs/images/create-group.png" width="230" alt="选择好友创建群聊"> <img src="docs/images/group-chat.png" width="230" alt="合成账号群聊"></p>
 

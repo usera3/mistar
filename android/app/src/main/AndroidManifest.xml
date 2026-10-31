@@ -1,6 +1,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
@@ -26,6 +29,7 @@
         <activity android:name=".AccountActivity" android:exported="false" android:windowSoftInputMode="adjustResize" android:configChanges="orientation|screenSize|keyboardHidden" />
         <activity android:name=".PeopleActivity" android:exported="false" />
         <activity android:name=".GroupActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
+        <activity android:name=".LocationActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
         <activity android:name=".SearchActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
         <activity android:name=".DeveloperActivity" android:exported="false" android:windowSoftInputMode="adjustResize" android:configChanges="orientation|screenSize|keyboardHidden" />
         <activity android:name=".StorageActivity" android:exported="false" />
@@ -40,6 +44,7 @@
         <activity android:name=".AvatarCropActivity" android:exported="false" />
         <service android:name=".ChatService" android:exported="false" android:foregroundServiceType="remoteMessaging|microphone|camera" />
         <service android:name=".ScreenShareService" android:exported="false" android:foregroundServiceType="mediaProjection|microphone" />
+        <service android:name=".LocationShareService" android:exported="false" android:foregroundServiceType="location" />
         <service android:name=".AssistAccessibilityService" android:label="@string/remote_assistance_label" android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE" android:exported="true">
             <intent-filter><action android:name="android.accessibilityservice.AccessibilityService" /></intent-filter>
             <meta-data android:name="android.accessibilityservice" android:resource="@xml/remote_assistance_service" />
