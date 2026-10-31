@@ -12,14 +12,15 @@ object BrandUi {
         setColor(color);cornerRadius=radius*context.resources.displayMetrics.density
         if(border!=null)setStroke((stroke*context.resources.displayMetrics.density).toInt().coerceAtLeast(1),border)
     }
-    fun card(context: Context,p: ThemePalette,radius: Int=22)=rounded(context,p.surface,radius,p.line)
+    fun card(context: Context,p: ThemePalette,radius: Int=18)=rounded(context,p.surface,radius)
     fun primary(context: Context,p: ThemePalette,radius: Int=18)=GradientDrawable(GradientDrawable.Orientation.TL_BR,intArrayOf(p.primary,p.primaryEnd)).apply {
         cornerRadius=radius*context.resources.displayMetrics.density
     }
     fun field(context: Context,p: ThemePalette)=StateListDrawable().apply {
-        addState(intArrayOf(android.R.attr.state_focused),rounded(context,p.surface,18,p.accent,2))
-        addState(intArrayOf(),rounded(context,p.surface,18,p.line))
+        addState(intArrayOf(android.R.attr.state_focused),fieldSurface(context,p,true))
+        addState(intArrayOf(),fieldSurface(context,p,false))
     }
+    fun fieldSurface(context:Context,p:ThemePalette,focused:Boolean)=rounded(context,if(focused)p.surface else p.field,14,if(focused)p.accent else null,2)
 }
 
 /** Quiet, static star/island details for welcome and cover surfaces, never behind chat text. */

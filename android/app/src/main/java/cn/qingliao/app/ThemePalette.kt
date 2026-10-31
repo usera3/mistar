@@ -27,21 +27,22 @@ object ThemeStore {
 class ThemePalette(color: Int) {
     val primary=color or Color.BLACK
     val ink=blend(primary,Color.rgb(30,32,43),.96f)
-    val muted=blend(primary,Color.rgb(101,107,123),.96f)
-    val surface=blend(primary,Color.WHITE,.995f)
-    val canvas=blend(primary,Color.WHITE,.965f)
-    val soft=blend(primary,Color.WHITE,.91f)
-    val line=blend(primary,Color.WHITE,.85f)
+    val surface=Color.WHITE
+    val canvas=blend(primary,Color.rgb(244,245,249),.98f)
+    val field=blend(primary,Color.rgb(237,240,246),.98f)
+    val soft=blend(primary,Color.WHITE,.92f)
+    val line=blend(primary,Color.rgb(226,229,237),.96f)
+    val muted=readable(blend(primary,Color.rgb(101,107,123),.96f),listOf(surface,canvas,field,soft))
     val heroStart=blend(primary,Color.WHITE,.90f)
-    val heroEnd=blend(primary,Color.WHITE,.985f)
-    val accent=readable(primary,listOf(surface,canvas,soft,heroStart))
+    val heroEnd=canvas
+    val accent=readable(primary,listOf(surface,canvas,field,soft,heroStart))
     val onPrimary=if(contrast(primary,Color.WHITE)>=contrast(primary,Color.BLACK))Color.WHITE else Color.BLACK
     val primaryEnd=blend(primary,if(onPrimary==Color.WHITE)Color.BLACK else Color.WHITE,.06f)
     val primaryInset=blend(primary,onPrimary,.09f)
     val profileEnd=heroEnd
-    val callTop=blend(primary,Color.rgb(20,24,32),.78f)
-    val callBottom=blend(primary,Color.rgb(16,20,27),.94f)
-    val callSurface=blend(primary,Color.rgb(36,43,53),.76f)
+    val callTop=blend(primary,Color.rgb(21,20,35),.88f)
+    val callBottom=blend(primary,Color.rgb(16,20,27),.97f)
+    val callSurface=blend(primary,Color.rgb(49,51,65),.92f)
     val callMuted=Color.rgb(199,208,221)
     val ripple=Color.argb(25,Color.red(accent),Color.green(accent),Color.blue(accent))
     companion object {

@@ -59,6 +59,7 @@ class MainActivity : Activity() {
     private var connectionLabel: TextView? = null
     private var peerTitle: TextView? = null
     private var unreadBadge: TextView? = null
+    private var homeNavigation:HomeNavigation?=null
     private var actionSheet: Dialog? = null
     private var messageMenu:MessageActionMenu?=null
     private val messageBubbles=mutableMapOf<String,View>()
@@ -486,39 +487,23 @@ class MainActivity : Activity() {
         window.statusBarColor=canvas;window.navigationBarColor=canvas
         val top=row().apply { setPadding(dp(if(compact)10 else 22),dp(if(tiny)2 else if(compact)8 else 16),dp(if(compact)10 else 20),dp(if(tiny)2 else if(compact)8 else 18)) }
         val heading=col()
-        val brand=row();brand.addView(Glyph(this,"star",accent),lp(10,10));brand.addView(text("弥星",11f,accent,true).apply{setPadding(dp(5),0,0,0)})
-        if(!compact){heading.addView(brand);space(heading,8)}
-        val headingText=text(arrayOf("消息","联系人","动态","我的")[tab],if(tiny)18f else if(compact)20f else 27f,ink,true)
+        val headingText=text(arrayOf("消息","联系人","动态","我的")[tab],if(tiny)18f else if(compact)20f else 25f,ink,true)
         connectionLabel=text(homeConnection(),if(tiny)10f else 11f,muted).apply{maxLines=1;ellipsize=android.text.TextUtils.TruncateAt.END}
         if(tiny){
             val condensed=row();condensed.addView(headingText);condensed.addView(connectionLabel,LinearLayout.LayoutParams(0,-2,1f).apply{marginStart=dp(10)});top.addView(condensed,LinearLayout.LayoutParams(0,-2,1f))
         }else{
             heading.addView(headingText);space(heading,if(compact)3 else 6);heading.addView(connectionLabel);top.addView(heading,LinearLayout.LayoutParams(0,-2,1f))
         }
-        if(tab<2) top.addView(icon("add","添加好友",accent) { searchFriend() }.apply { touch(this,soft,14) })
-        if(tab==2)top.addView(icon("camera","发布动态",accent) { composePost() }.apply { touch(this,soft,14) })
+        if(tab<2) top.addView(icon("add","添加好友",accent) { searchFriend() }.apply { touch(this,palette.surface,16) })
+        if(tab==2)top.addView(icon("camera","发布动态",accent) { composePost() }.apply { touch(this,palette.surface,16) })
         root.addView(top,lp())
         val scroll=ScrollView(this).apply { isFillViewport=true; clipToPadding=false; isVerticalScrollBarEnabled=false }
         content=col().apply { setPadding(dp(if(compact)8 else 20),0,dp(if(compact)8 else 20),dp(if(compact)10 else 24)) }; scroll.addView(content)
         root.addView(scroll,LinearLayout.LayoutParams(-1,0,1f))
-        val nav=row().apply { setPadding(dp(if(compact)2 else 8),dp(if(compact)2 else 7),dp(if(compact)2 else 8),dp(if(compact)2 else 6));background=BrandUi.card(this@MainActivity,palette,26) }
-        listOf("chat" to "消息","contacts" to "联系人","moments" to "动态","me" to "我的").forEachIndexed { i,(kind,label) ->
-            val selected=tab==i
-            val item=col().apply { gravity=Gravity.CENTER; contentDescription=label; touch(this,Color.TRANSPARENT,16) }
-            val mark=FrameLayout(this).apply {
-                if(selected)background=BrandUi.primary(this@MainActivity,palette,16)
-                addView(Glyph(this@MainActivity,kind,if(selected)palette.onPrimary else muted),FrameLayout.LayoutParams(dp(22),dp(22),Gravity.CENTER))
-            }
-            if(i==0) {
-                unreadBadge=text("",9f,Color.WHITE,true).apply { gravity=Gravity.CENTER; background=bg(Color.rgb(209,91,82),10); minWidth=dp(17); setPadding(dp(4),dp(1),dp(4),dp(1)); visibility=View.GONE }
-                mark.addView(unreadBadge,FrameLayout.LayoutParams(-2,dp(17),Gravity.TOP or Gravity.END))
-            }
-            item.addView(mark,lp(if(compact)36 else 54,if(compact)24 else 30)); space(item,3)
-            item.addView(text(label,11f,if(selected)accent else muted,selected))
-            nav.addView(item,LinearLayout.LayoutParams(0,dp(if(compact)48 else 60),1f)); item.setOnClickListener { if(tab!=i){tab=i;showHome(true);refresh()} }
-            if(selected&&tabChange)Motion.reveal(mark,y=0f,duration=180,from=.5f)
-        }
-        root.addView(nav,lp().apply{marginStart=dp(if(compact)4 else 14);marginEnd=dp(if(compact)4 else 14);bottomMargin=dp(if(compact)2 else 8);topMargin=dp(4)})
+        val nav=homeNavigation?.takeIf{it.themeColor==palette.primary}?:HomeNavigation(this,palette.primary){next->if(Hub.token.isNotEmpty()&&!callScreen&&peer==null&&!isDestroyed&&!isFinishing&&tab!=next){tab=next;showHome(true);refresh()}}
+        (nav.parent as? ViewGroup)?.removeView(nav);homeNavigation=nav;unreadBadge=nav.badge
+        root.addView(nav,lp().apply{marginStart=dp(if(compact)4 else 12);marginEnd=dp(if(compact)4 else 12);bottomMargin=dp(if(compact)2 else 8);topMargin=dp(6)})
+        nav.select(tab,tabChange)
         renderHome(); updateUnreadBadge();if(tabChange)Motion.reveal(scroll,y=5f,duration=190,from=.6f)
     }
     private fun updateUnreadBadge() {
@@ -651,14 +636,20 @@ class MainActivity : Activity() {
         val friends=(0 until contacts.length()).map { contacts.getJSONObject(it) }.filter { it.optString("state")=="accepted" }.sortedBy { it.optString("nickname") }
         section(parent,"我的朋友 · ${friends.size}")
         if(friends.isEmpty()) { empty(parent,"朋友，让生活热闹一点","用账号或弥星号，找到彼此","添加朋友") { searchFriend() }; return }
+        val group=col().apply{background=BrandUi.card(this@MainActivity,palette);clipToOutline=true}
         friends.forEachIndexed { i,u ->
-            val item=row().apply { touch(this,palette.surface,22); setPadding(dp(14),dp(15),dp(14),dp(15)); setOnClickListener { openChat(u) } }; item.addView(avatar(u,48))
-            val info=col().apply { setPadding(dp(14),0,dp(8),0) }; info.addView(text(displayName(u),16f,ink,true).apply { maxLines=1; ellipsize=android.text.TextUtils.TruncateAt.END }); space(info,6)
-            val statusLabel=text(status(u),12f,if(Hub.connected && u.optBoolean("online"))accent else muted)
-            info.addView(statusLabel); contactStatusLabels.add(u to statusLabel)
-            item.addView(info,LinearLayout.LayoutParams(0,-2,1f)); item.addView(Glyph(this,"arrow",muted),lp(16,16)); parent.addView(item,lp().apply{bottomMargin=dp(9)})
-        }
+            val side=if(compact)38 else 46
+            val item=row().apply { touch(this,palette.surface,0);setPadding(dp(14),dp(if(compact)10 else 13),dp(14),dp(if(compact)10 else 13));setOnClickListener{openChat(u)} }
+            item.addView(avatar(u,side))
+            val info=col().apply{setPadding(dp(12),0,dp(8),0)}
+            info.addView(text(displayName(u),if(compact)14f else 16f,ink,true).apply{maxLines=1;ellipsize=android.text.TextUtils.TruncateAt.END});space(info,5)
+            val statusLabel=text(status(u),12f,if(Hub.connected&&u.optBoolean("online"))accent else muted)
+            info.addView(statusLabel);contactStatusLabels.add(u to statusLabel)
+            item.addView(info,LinearLayout.LayoutParams(0,-2,1f));item.addView(Glyph(this,"arrow",muted),lp(15,15));group.addView(item,lp())
+            if(i<friends.lastIndex)divider(group,14+side+12)
+        };parent.addView(group,lp())
     }
+
     private fun respond(u: JSONObject, accept: Boolean) {
         val session=Hub.token
         Hub.job({ Hub.rawApi("POST","/api/friends/respond",JSONObject().put("peer",u.getString("id")).put("accept",accept),session).also {
@@ -681,7 +672,7 @@ class MainActivity : Activity() {
         card.addView(text("@"+Hub.me.optString("username"),12f,muted).apply { maxLines=1; ellipsize=android.text.TextUtils.TruncateAt.END }); parent.addView(card,lp())
         fun setting(group: LinearLayout, kind: String, label: String, value: String, last: Boolean=false, action: (() -> Unit)?=null) {
             val r=row().apply { setPadding(dp(16),0,dp(14),0); minimumHeight=dp(58); if(action!=null)touch(this,Color.WHITE,16) }
-            val mark=FrameLayout(this).apply { background=bg(canvas,10); addView(Glyph(this@MainActivity,kind,accent),FrameLayout.LayoutParams(dp(18),dp(18),Gravity.CENTER)) }
+            val mark=FrameLayout(this).apply { background=bg(soft,10); addView(Glyph(this@MainActivity,kind,accent),FrameLayout.LayoutParams(dp(18),dp(18),Gravity.CENTER)) }
             r.addView(mark,lp(32,32)); r.addView(text(label,14f,ink).apply { setPadding(dp(12),0,dp(8),0) },LinearLayout.LayoutParams(0,-2,1f))
             r.addView(text(value,12f,muted).apply { maxWidth=dp(if(resources.configuration.screenWidthDp<360)84 else 112); maxLines=1; ellipsize=android.text.TextUtils.TruncateAt.END })
             if(action!=null) { r.addView(Glyph(this,"arrow",Color.rgb(178,185,196)),lp(16,16)); r.setOnClickListener { action() } }
@@ -1104,7 +1095,7 @@ class MainActivity : Activity() {
         if(compact)inputRow.addView(icon("add","更多发送方式",accent){sendMenu()}.apply{tag="composer.more"},lp(36,44))
         else{recorderButton=icon("mic","录制语音消息",accent){startRecordingScoped()}.apply{tag="composer.record"};inputRow.addView(recorderButton,lp(40,48))}
         composer=EditText(this).apply {
-            hint=if(compact)"消息" else "发消息…"; textSize=if(compact)14f else 16f; setTextColor(ink); setHintTextColor(muted); background=bg(canvas,15); setPadding(dp(if(compact)8 else 14),dp(if(compact)8 else 12),dp(if(compact)8 else 14),dp(if(compact)8 else 12)); minHeight=dp(if(compact)40 else 48);minimumWidth=0;minWidth=0
+            hint=if(compact)"消息" else "发消息…"; textSize=if(compact)14f else 16f; setTextColor(ink); setHintTextColor(muted); background=bg(palette.field,14); setPadding(dp(if(compact)8 else 14),dp(if(compact)8 else 12),dp(if(compact)8 else 14),dp(if(compact)8 else 12)); minHeight=dp(if(compact)40 else 48);minimumWidth=0;minWidth=0
             inputType=InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
             maxLines=if(compact)2 else 4
             setOnTouchListener{_,e->if(e.actionMasked==android.view.MotionEvent.ACTION_DOWN)inputPanel?.hide();false}
@@ -1189,7 +1180,7 @@ class MainActivity : Activity() {
             .setNegativeButton("取消",null).setPositiveButton("同意并开始"){_,_->prefs.edit().putBoolean("consent",true).apply();launch()}.showThemed()
     }
     private fun bubbleBackground(mine: Boolean): GradientDrawable = (if(mine)BrandUi.primary(this,palette,20) else BrandUi.card(this,palette,20)).apply {
-        val wide=dp(20).toFloat(); val small=dp(7).toFloat()
+        val wide=dp(18).toFloat(); val small=dp(6).toFloat()
         cornerRadii=if(mine)floatArrayOf(wide,wide,small,small,wide,wide,wide,wide) else floatArrayOf(small,small,wide,wide,wide,wide,wide,wide)
     }
     private fun messageTime(ms: Long): String {
@@ -1314,7 +1305,7 @@ class MainActivity : Activity() {
             }
             "file" -> {
                 val f=m.optJSONObject("file"); val r=row()
-                val mark=FrameLayout(this).apply { background=bg(if(mine)palette.primaryInset else Color.rgb(239,235,246),11); addView(Glyph(this@MainActivity,"file",if(mine)palette.onPrimary else Color.rgb(132,96,158)),FrameLayout.LayoutParams(dp(23),dp(26),Gravity.CENTER)) }
+                val mark=FrameLayout(this).apply { background=bg(if(mine)palette.primaryInset else soft,11); addView(Glyph(this@MainActivity,"file",if(mine)palette.onPrimary else accent),FrameLayout.LayoutParams(dp(23),dp(26),Gravity.CENTER)) }
                 r.addView(mark,lp(40,44))
                 val detail=col().apply { setPadding(dp(12),0,0,0) }
                 detail.addView(text(f?.optString("name")?:"文件",14f,bubbleInk,true).apply { maxLines=2; this.maxWidth=(maxWidth-dp(52)).coerceAtLeast(dp(60)); ellipsize=android.text.TextUtils.TruncateAt.END }); space(detail,7)
@@ -1819,7 +1810,7 @@ class MainActivity : Activity() {
         val pip=isInPictureInPictureMode||pipTransition
         val assist=Hub.rtc?.assist
         val show=!pip&&(Hub.phase!="connected"||callVideoState.controlsVisible||assist?.controlling==true)
-        callTopOverlay?.visibility=if(show)View.VISIBLE else View.GONE;callBottomOverlay?.visibility=if(show)View.VISIBLE else View.GONE
+        Motion.show(callTopOverlay,show);Motion.show(callBottomOverlay,show)
         callVideoStage?.let{stage->
             stage.presentation(pip);stage.refresh()
             callScaleControl?.apply{text=if(assist?.controlling==true||stage.filled)"完整"else"铺满";contentDescription=if(assist?.controlling==true)"控制使用完整画面"else if(stage.filled)"完整显示画面"else"铺满屏幕";isEnabled=assist?.controlling!=true&&(if(stage.localIsMain)Hub.rtc?.cameraEnabled==true else Hub.rtc?.remoteVideoMode!="off");alpha=if(isEnabled)1f else .45f}
@@ -1916,7 +1907,7 @@ class MainActivity : Activity() {
         fun update(view:LinearLayout?,kind:String,label:String,selected:Boolean) {
             if(view==null)return
             val color=if(selected)palette.primary else palette.callSurface;val circle=view.getChildAt(0) as FrameLayout
-            circle.background=bg(color,32);circle.removeAllViews();circle.addView(Glyph(this,kind,if(selected)palette.onPrimary else Color.WHITE),FrameLayout.LayoutParams(dp(25),dp(25),Gravity.CENTER))
+            circle.background=bg(color,if(videoEdge)18 else 32);circle.removeAllViews();circle.addView(Glyph(this,kind,if(selected)palette.onPrimary else Color.WHITE),FrameLayout.LayoutParams(dp(25),dp(25),Gravity.CENTER))
             (view.getChildAt(view.childCount-1) as? TextView)?.text=label;view.contentDescription=label
         }
         update(micControl,if(Hub.rtc?.muted==true)"micOff" else "mic",if(Hub.rtc?.muted==true)"已静音" else "麦克风",Hub.rtc?.muted==true)
@@ -1927,8 +1918,8 @@ class MainActivity : Activity() {
     }
     private fun callControl(kind: String,label: String,color: Int=palette.callSurface,action: ()->Unit): LinearLayout {
         val box=col().apply { gravity=Gravity.CENTER; contentDescription=label; isClickable=true; isFocusable=true; setOnClickListener { action() } }
-        val circle=FrameLayout(this).apply { background=bg(color,32); addView(Glyph(this@MainActivity,kind,if(color==palette.primary)palette.onPrimary else Color.WHITE),FrameLayout.LayoutParams(dp(25),dp(25),Gravity.CENTER)) }
-        val side=if(tiny)40 else if(compact||resources.configuration.screenHeightDp<520)48 else 64
+        val circle=FrameLayout(this).apply { background=bg(color,if(videoEdge)18 else 32); addView(Glyph(this@MainActivity,kind,if(color==palette.primary)palette.onPrimary else Color.WHITE),FrameLayout.LayoutParams(dp(25),dp(25),Gravity.CENTER)) }
+        val side=if(tiny)40 else if(compact||resources.configuration.screenHeightDp<520)48 else if(videoEdge)56 else 64
         box.addView(circle,lp(side,side)); space(box,if(tiny)4 else if(side==48)6 else 10); box.addView(text(label,if(tiny)10f else 12f,palette.callMuted).apply{maxLines=1;ellipsize=android.text.TextUtils.TruncateAt.END}); return box
     }
     private fun releaseRenderers() {

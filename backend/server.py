@@ -240,7 +240,7 @@ async def authentication(request, handler):
 def public_plaza_open(): return os.environ.get('QINGLIAO_PUBLIC_PLAZA', '0') == '1'
 
 
-async def health(request): return web.json_response({'ok': True, 'app': 'qingliao', 'version': '1.20.0', 'app_updates':True, 'membership':True,'moderation': True, 'require_email': security.require_email, 'require_e2ee': security.require_e2ee, 'bot_api': 'webhook-v1', 'bot_calls':True,'moments_media':True,'moments_public':public_plaza_open(),'moments_video_covers':True,'bot_calls_default_allowed':True,'call_busy_feedback':True})
+async def health(request): return web.json_response({'ok': True, 'app': 'qingliao', 'version': '1.21.0', 'password_reset_email_only':True, 'app_updates':True, 'membership':True,'moderation': True, 'require_email': security.require_email, 'require_e2ee': security.require_e2ee, 'bot_api': 'webhook-v1', 'bot_calls':True,'moments_media':True,'moments_public':public_plaza_open(),'moments_video_covers':True,'bot_calls_default_allowed':True,'call_busy_feedback':True})
 
 
 async def register(request):

@@ -92,9 +92,11 @@ object AuthDeveloperTests {
             fill("auth.code","123456");fill("auth.email","other@example.com");click("auth.submit");check(count("/api/register")==0);checks++
             fill("auth.email","native@example.com");click("auth.back");check(text("auth.nickname")=="星光助手"&&text("auth.password")=="synthetic-pass-123");click("auth.next");check(text("auth.email")=="native@example.com");checks++
             screen("register-email");click("auth.submit");await{text("auth.status")=="这个账号已被使用"};check(count("/api/register")==1);check(requests.last{it.first=="/api/register"}.second.getString("verification_id")=="synthetic-register");checks++
-            click("auth.back");click("auth.login");check(text("auth.password").isEmpty());click("auth.forgot");fill("auth.username","native_test");fill("auth.email","native@example.com")
-            await(5000){find("auth.sendCode")?.isEnabled==true};click("auth.sendCode");idle();fill("auth.code","123456");click("auth.submit");fill("auth.password","new-synthetic-pass");fill("auth.confirm","mismatch");click("auth.submit");check(count("/api/password/reset")==0);checks++
-            fill("auth.confirm","new-synthetic-pass");click("auth.submit");await{text("auth.status")=="密码已重置，请使用新密码登录。"};check(text("auth.password").isEmpty());checks++
+            click("auth.back");click("auth.login");check(text("auth.password").isEmpty());click("auth.forgot");check(find("auth.username")==null);checks++;fill("auth.email","NATIVE@example.com")
+            await(5000){find("auth.sendCode")?.isEnabled==true};screen("forgot-email");click("auth.sendCode");idle();check(!requests.last{it.first=="/api/auth/code"}.second.has("username"));checks++
+            fill("auth.code","123456");fill("auth.email","other@example.com");click("auth.submit");check(find("auth.confirm")==null);checks++
+            fill("auth.email","native@example.com");click("auth.submit");fill("auth.password","new-synthetic-pass");fill("auth.confirm","mismatch");click("auth.submit");check(count("/api/password/reset")==0);checks++
+            fill("auth.confirm","new-synthetic-pass");click("auth.submit");await{text("auth.status")=="密码已重置，请使用新密码登录。"};check(text("auth.password").isEmpty()&&text("auth.username")=="native@example.com");check(!requests.last{it.first=="/api/password/reset"}.second.has("username"));checks++
             // A successful old-screen response must not create a session after navigation/disposal.
             fill("auth.username","native_test");fill("auth.password","synthetic-pass-123");block.set(true);click("auth.submit");check(entered.await(4,TimeUnit.SECONDS))
             ui{activity.javaClass.getDeclaredMethod("showLogin",Boolean::class.javaPrimitiveType).apply{isAccessible=true}.invoke(activity,false)};release.countDown();Thread.sleep(300);check(Hub.token.isEmpty());checks++

@@ -120,8 +120,8 @@ class Security:
             self.c['auth'](request.headers.get('Authorization', '').removeprefix('Bearer '))
             valid = not self.c['guard'].email_taken(email)
         elif purpose == 'reset':
-            name = str(p.get('username', '')).strip().lower()
-            u = self.c['row']('SELECT id FROM users WHERE (username=? OR id=?) AND email=?', (name, name, email))
+            # Verified email is unique. Client-supplied usernames never select the reset target.
+            u = self.c['row']('SELECT id FROM users WHERE email=?', (email,))
             uid = u['id'] if u else ''
             valid = bool(u)
         else:
@@ -154,8 +154,7 @@ class Security:
         self.c['limited']('reset-ip:' + request['client_ip'], 20, 3600)
         p = await request.json()
         email = self.email(p.get('email', ''))
-        name = str(p.get('username', '')).strip().lower()
-        u = self.c['row']('SELECT * FROM users WHERE (username=? OR id=?) AND email=?', (name, name, email))
+        u = self.c['row']('SELECT * FROM users WHERE email=?', (email,))
         vid = self.verify(p, 'reset', email, u['id'] if u else '')
         if not u: self.reject('验证码无效或已过期，请重新获取')
         await self.set_password(u, p.get('new_password', ''), vid)

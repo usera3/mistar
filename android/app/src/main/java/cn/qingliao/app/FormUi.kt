@@ -28,9 +28,9 @@ internal class FormUi(val context:Context,val p:ThemePalette) {
         setLineSpacing(dp(3).toFloat(),1f)
     }
     fun gap(parent:LinearLayout,n:Int=12){parent.addView(View(context),lp(1,n))}
-    fun card()=col().apply{background=BrandUi.card(context,p,22);val padding=dp(if(tiny)12 else 16);setPadding(padding,padding,padding,padding)}
+    fun card()=col().apply{background=BrandUi.card(context,p);val padding=dp(if(tiny)12 else 16);setPadding(padding,padding,padding,padding)}
     fun touch(v:View,primary:Boolean=false){
-        v.background=RippleDrawable(ColorStateList.valueOf(p.ripple),if(primary)BrandUi.primary(context,p,16)else BrandUi.rounded(context,p.soft,16),null)
+        v.background=RippleDrawable(ColorStateList.valueOf(p.ripple),if(primary)BrandUi.primary(context,p,16)else BrandUi.rounded(context,p.soft,16),BrandUi.rounded(context,Color.WHITE,16))
         v.isFocusable=true;v.isClickable=true;Motion.press(v)
     }
     fun button(title:String,tag:String,primary:Boolean=true,click:()->Unit)=text(title,14f,if(primary)p.onPrimary else p.accent,true).apply{
@@ -39,7 +39,7 @@ internal class FormUi(val context:Context,val p:ThemePalette) {
     }
     fun link(title:String,tag:String,click:()->Unit)=text(title,13f,p.accent,true).apply{
         this.tag=tag;gravity=Gravity.CENTER;minimumHeight=dp(48);setPadding(dp(6),dp(10),dp(6),dp(10))
-        isFocusable=true;setOnClickListener{if(isEnabled)click()};Motion.press(this)
+        background=RippleDrawable(ColorStateList.valueOf(p.ripple),null,BrandUi.rounded(context,Color.WHITE,12));isFocusable=true;setOnClickListener{if(isEnabled)click()};Motion.press(this)
     }
     fun icon(kind:String,title:String,click:()->Unit)=FrameLayout(context).apply{
         contentDescription=title;minimumWidth=dp(48);minimumHeight=dp(48);isFocusable=true
@@ -66,7 +66,7 @@ internal class FormUi(val context:Context,val p:ThemePalette) {
             val label=text(title,12f,p.muted,true);view.addView(label,lp());if(tiny)label.visibility=View.GONE else gap(view,6)
             edit.id=View.generateViewId();label.labelFor=edit.id
             shell.addView(edit,LinearLayout.LayoutParams(0,-2,1f))
-            edit.setOnFocusChangeListener{_,focus->shell.background=BrandUi.rounded(context,p.surface,18,if(focus)p.accent else p.line,if(focus)2 else 1)}
+            edit.setOnFocusChangeListener{_,focus->shell.background=BrandUi.fieldSurface(context,p,focus)}
             if(secret){
                 edit.transformationMethod=PasswordTransformationMethod.getInstance()
                 val toggle=icon("eye","显示密码"){}.apply{tag="$key.visibility"}

@@ -19,7 +19,7 @@ internal class AuthScreen(private val activity:Activity,private val p:ThemePalet
     private var busy=false
     private var username="";private var nickname="";private var password=""
     private var email="";private var code="";private var confirm=""
-    private var verification="";private var verifiedEmail="";private var verifiedUsername=""
+    private var verification="";private var verifiedEmail=""
     private var retryAt=0L
     private var codeButton:TextView?=null
     private lateinit var status:TextView
@@ -40,7 +40,7 @@ internal class AuthScreen(private val activity:Activity,private val p:ThemePalet
         if(busy||!valid())return
         val resetFlow=page.startsWith("reset");val nextReset=next.startsWith("reset")
         if(resetFlow!=nextReset||next=="login"){
-            verification="";verifiedEmail="";verifiedUsername="";code="";confirm=""
+            verification="";verifiedEmail="";code="";confirm=""
             if(resetFlow)password=""
         }
         page=next;render()
@@ -59,7 +59,7 @@ internal class AuthScreen(private val activity:Activity,private val p:ThemePalet
         header.addView(u.text("MISTAR",11f,p.accent,true).apply{letterSpacing=.16f;setPadding(u.dp(10),0,0,0)},LinearLayout.LayoutParams(0,-2,1f))
         form.addView(header,u.lp());u.gap(form,if(u.tiny)8 else if(u.compact)12 else 32)
         val title=when(page){"login"->if(u.tiny)"欢迎回到弥星"else"相伴，从这里开始";"register"->if(u.tiny)"创建弥星账号"else"认识一下，新朋友";"register.email"->"验证你的邮箱";"reset"->"找回你的账号";else->"设置新密码"}
-        val subtitle=when(page){"login"->"登录弥星，继续和在意的人聊天。";"register"->"先设置你的昵称、账号和密码。";"register.email"->"最后一步，用邮箱保护你的账号。";"reset"->"通过已绑定的邮箱验证身份。";else->"重置后，所有设备都需要重新登录。"}
+        val subtitle=when(page){"login"->"登录弥星，继续和在意的人聊天。";"register"->"先设置你的昵称、账号和密码。";"register.email"->"最后一步，用邮箱保护你的账号。";"reset"->"填写绑定邮箱即可找回，无需记住账号。";else->"重置后，所有设备都需要重新登录。"}
         form.addView(u.text(title,if(u.tiny)18f else if(u.compact)23f else 28f,bold=true),u.lp());u.gap(form,if(u.tiny)12 else 8)
         if(!u.tiny){form.addView(u.text(subtitle,13f,p.muted),u.lp());u.gap(form,if(u.compact)16 else 26)}
         if(page.startsWith("register")||page.startsWith("reset")){
@@ -75,7 +75,7 @@ internal class AuthScreen(private val activity:Activity,private val p:ThemePalet
         status=u.text("",13f,p.accent).apply{tag="auth.status";visibility=View.GONE;accessibilityLiveRegion=View.ACCESSIBILITY_LIVE_REGION_POLITE}
         when(page){
             "login"->{
-                val name=field("账号","账号或 8 位弥星号","auth.username",username,type=InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD)
+                val name=field("账号",if(u.tiny)"邮箱、账号或弥星号"else"账号、邮箱或 8 位弥星号","auth.username",username,max=254,type=InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD)
                 val pass=field("密码","输入登录密码","auth.password",password,true)
                 name.edit.setAutofillHints(View.AUTOFILL_HINT_USERNAME);pass.edit.setAutofillHints(View.AUTOFILL_HINT_PASSWORD)
                 capture={username=name.value();password=pass.value()}
@@ -100,18 +100,17 @@ internal class AuthScreen(private val activity:Activity,private val p:ThemePalet
             }
             "register.email","reset"->{
                 val reset=page=="reset"
-                val name=if(reset)field("账号","账号或弥星号","auth.username",username)else null
                 val mail=field("邮箱",if(reset)"注册或绑定时验证的邮箱"else"输入可接收验证码的邮箱","auth.email",email,max=254,type=InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS)
                 mail.edit.setAutofillHints(View.AUTOFILL_HINT_EMAIL_ADDRESS)
                 val otp=field("验证码","6 位邮箱验证码","auth.code",code,max=6,type=InputType.TYPE_CLASS_NUMBER)
                 otp.edit.importantForAutofill=View.IMPORTANT_FOR_AUTOFILL_NO
-                capture={name?.let{username=it.value()};email=mail.value().trim();code=otp.value()}
+                capture={email=mail.value().trim().lowercase(java.util.Locale.ROOT);code=otp.value()}
                 codeButton=u.button("发送验证码","auth.sendCode",false){
                     capture?.invoke();clearErrors()
-                    when{reset&&username.isBlank()->name!!.fail("请输入账号或弥星号");!emailValid(email)->mail.fail("请输入正确的邮箱地址");SystemClock.elapsedRealtime()<retryAt->Unit;else->{
-                        val address=email;val account=username
-                        request("/api/auth/code",JSONObject().put("purpose",if(reset)"reset"else"register").put("email",address).apply{if(reset)put("username",account)},"正在发送验证码…"){
-                            verification=it.getString("verification_id");verifiedEmail=address;verifiedUsername=account
+                    when{!emailValid(email)->mail.fail("请输入正确的邮箱地址");SystemClock.elapsedRealtime()<retryAt->Unit;else->{
+                        val address=email
+                        request("/api/auth/code",JSONObject().put("purpose",if(reset)"reset"else"register").put("email",address),"正在发送验证码…"){
+                            verification=it.getString("verification_id");verifiedEmail=address
                             retryAt=SystemClock.elapsedRealtime()+it.optLong("retry_after",60).coerceIn(1,3600)*1000
                             otp.edit.text.clear();code="";message(if(reset)"信息匹配时会发送验证码，请检查邮箱及垃圾邮件。"else"验证码已发送，请检查邮箱及垃圾邮件。")
                             updateCountdown()
@@ -121,7 +120,7 @@ internal class AuthScreen(private val activity:Activity,private val p:ThemePalet
                 form.addView(status,u.lp());u.gap(form,10)
                 val next={capture?.invoke();clearErrors();when{
                     !emailValid(email)->mail.fail("请输入正确的邮箱地址")
-                    verification.isEmpty()||verifiedEmail!=email||reset&&verifiedUsername!=username->mail.fail("请先为当前邮箱和账号发送验证码")
+                    verification.isEmpty()||verifiedEmail!=email->mail.fail("请先为当前邮箱发送验证码")
                     !code.matches(Regex("[0-9]{6}"))->otp.fail("请输入 6 位验证码")
                     reset->go("reset.password")
                     else->request("/api/register",JSONObject().put("username",username.trim()).put("nickname",nickname.trim()).put("password",password).put("email",email).put("verification_id",verification).put("code",code),"正在创建账号…"){signedIn(it)}
@@ -135,8 +134,8 @@ internal class AuthScreen(private val activity:Activity,private val p:ThemePalet
                 pass.edit.setAutofillHints("newPassword");again.edit.setAutofillHints("newPassword")
                 capture={password=pass.value();confirm=again.value()}
                 form.addView(status,u.lp());u.gap(form,8)
-                val submit={capture?.invoke();clearErrors();when{password.length !in 8..128->pass.fail("密码需为 8–128 位");password!=confirm->again.fail("两次输入的密码不一致");else->request("/api/password/reset",JSONObject().put("username",username.trim()).put("email",email).put("verification_id",verification).put("code",code).put("new_password",password),"正在重置密码…"){
-                    password="";confirm="";go("login");message("密码已重置，请使用新密码登录。")
+                val submit={capture?.invoke();clearErrors();when{password.length !in 8..128->pass.fail("密码需为 8–128 位");password!=confirm->again.fail("两次输入的密码不一致");else->request("/api/password/reset",JSONObject().put("email",email).put("verification_id",verification).put("code",code).put("new_password",password),"正在重置密码…"){
+                    username=email;password="";confirm="";go("login");message("密码已重置，请使用新密码登录。")
                 }};Unit}
                 form.addView(u.button("重置密码","auth.submit",click=submit),u.lp());again.done(submit)
             }

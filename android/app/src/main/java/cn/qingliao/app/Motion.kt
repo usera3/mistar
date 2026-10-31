@@ -31,6 +31,11 @@ object Motion {
         view.animate().alpha(1f).translationX(0f).translationY(0f).setDuration(duration).setInterpolator(ease).withLayer().start()
     }
     fun image(view:View) { reveal(view,y=0f,duration=150) }
+    fun show(view:View?,visible:Boolean){
+        if(view==null||visible==(view.visibility==View.VISIBLE))return
+        rest(view);view.visibility=if(visible)View.VISIBLE else View.GONE
+        if(visible)reveal(view,y=2f,duration=160)
+    }
     fun photo(current:View,previous:android.widget.ImageView,direction:Int) {
         rest(current);rest(previous)
         if(!enabled()){previous.visibility=View.GONE;previous.setImageDrawable(null);return}
