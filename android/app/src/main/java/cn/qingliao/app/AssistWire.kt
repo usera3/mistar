@@ -6,9 +6,9 @@ import org.json.JSONObject
 
 /** Small, input-only protocol. No scripts, text/clipboard, file operations or accessibility trees. */
 internal object AssistWire {
-    const val CHANNEL="mistar.remote-assistance.v1"
+    const val CHANNEL="mistar.remote-assistance.v2"
+    const val VERSION=2
     const val MAX_BYTES=1536
-    const val LEASE_MS=600000L
     data class Geometry(val width:Int,val height:Int,val rotation:Int){
         init{require(width in 64..16384&&height in 64..16384&&rotation in 0..3)}
         fun json()=JSONObject().put("w",width).put("h",height).put("r",rotation)

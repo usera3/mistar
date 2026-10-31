@@ -42,10 +42,12 @@ internal object AssistControllerTests {
                 val before=h.packets.count{it.optString("t")=="request"}
                 invoke("assistanceMenu");await("outgoing assistance request"){h.engine.assist.pending&&h.packets.count{it.optString("t")=="request"}>before}
                 val request=h.packets.last{it.optString("t")=="request"}.getString("request")
-                val p=JSONObject().put("request",request).put("lease",UUID.randomUUID().toString().replace("-","")).put("geometry",geometry.json()).put("ttl",600000).put("ticket",UUID.randomUUID().toString().replace("-",""))
+                val p=JSONObject().put("request",request).put("lease",UUID.randomUUID().toString().replace("-","")).put("geometry",geometry.json()).put("ttl",0).put("ticket",UUID.randomUUID().toString().replace("-",""))
+                h.send("grant",JSONObject(p.toString()).put("ttl",600000));Thread.sleep(200);check(!h.engine.assist.controlling&&h.engine.assist.pending)
                 h.send("grant",p);await("controller consent result"){h.engine.assist.controlling&&h.engine.assist.canTouchPeer()};return p
             }
             val first=grant(true);val stage=field(a,"callVideoStage") as CallVideoStage
+            ui{h.engine.assist.javaClass.getDeclaredField("clock").apply{isAccessible=true}.set(h.engine.assist,{SystemClock.elapsedRealtime()+86400000});(field(h.engine.assist,"tick") as Runnable).run();check(h.engine.assist.controlling);h.engine.assist.javaClass.getDeclaredField("clock").apply{isAccessible=true}.set(h.engine.assist,{SystemClock.elapsedRealtime()})};checks++
             check(!stage.localIsMain&&!stage.filled&&find("call.scale")!!.isEnabled==false);checks++
             fun freePoints():Pair<PointF,PointF>{
                 val location=IntArray(2);stage.getLocationOnScreen(location);val rect=geometry.videoRect(stage.width,stage.height)

@@ -1890,7 +1890,7 @@ class MainActivity : Activity() {
         val ready=AssistAccessibilityService.available();val full=ScreenSharing.controlShareId(engine)!=null
         val request=a.incomingRequest
         val safeName=displayName(Hub.callUser).filter{!it.isISOControl()&&it !in '\u202a'..'\u202e'&&it !in '\u2066'..'\u2069'}.take(32)
-        val description="$safeName（${Hub.callUser.optString("id")}）可点按、长按、滑动，以及返回或桌面。权限最长10分钟，仅用于本次共享；你仍能触摸并随时停止。允许后请由你切换到需要协助的应用。弥星自身、系统授权等界面不接受远程操作。"+(if(!ready)"\n\n首次需要在系统无障碍中开启“弥星远程协助”，返回后再次确认本次允许。开启服务本身不会允许任何人控制。"else"")
+        val description="$safeName（${Hub.callUser.optString("id")}）可点按、长按、滑动，以及返回或桌面。本次共享授权不限时；你仍能触摸并随时停止。停止共享、锁屏或挂断会撤销，下次重新允许。允许后请由你切换到需要协助的应用。弥星自身、系统授权等界面不接受远程操作。"+(if(!ready)"\n\n首次需要在系统无障碍中开启“弥星远程协助”，返回后再次确认本次允许。开启服务本身不会允许任何人控制。"else"")
         val dialog=AlertDialog.Builder(this).setTitle(if(request.isNotEmpty())"允许对方协助？"else"远程协助")
             .setMessage((if(request.isEmpty())"请让对方先点击“远程协助”申请控制。\n\n"else"")+description)
             .setNegativeButton("关闭",null)

@@ -74,8 +74,8 @@ internal class AssistPeerFixture(private val i:Instrumentation,val callId:String
     fun pauseVideo(){active.set(false)}
     fun resumeVideo(){active.set(true)}
     fun videoMode(mode:String,sequence:Int){modes?.send(DataChannel.Buffer(ByteBuffer.wrap(JSONObject().put("mode",mode).put("seq",sequence).toString().toByteArray()),false))}
-    fun send(type:String,body:JSONObject=JSONObject()):Boolean {
-        body.put("v",1).put("t",type).put("call",callId)
+    fun send(type:String,body:JSONObject=JSONObject(),version:Int=AssistWire.VERSION):Boolean {
+        body.put("v",version).put("t",type).put("call",callId)
         return control?.send(DataChannel.Buffer(ByteBuffer.wrap(body.toString().toByteArray()),false))==true
     }
     override fun close(){

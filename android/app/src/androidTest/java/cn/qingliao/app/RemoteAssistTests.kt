@@ -94,7 +94,13 @@ internal object RemoteAssistTests {
                 return host.packets.last{it.optString("t")=="grant"&&it.optString("request")==request}
             }
             ui{ThemeStore.save(i.targetContext,0xFFFFC107.toInt())};host.autoAcceptGrant=false;var grant=approve();checks++
+            check(grant.getInt("ttl")==0&&grant.getInt("v")==2);checks++
+            var elapsed=0L;ui{set(host.engine.assist,"clock",{SystemClock.elapsedRealtime()+elapsed})}
+            fun advanceHost(by:Long){ui{elapsed=by;(field(host.engine.assist,"tick") as Runnable).run()}}
+            advanceHost(5100);check(!host.engine.assist.hosting);checks++
+            advanceHost(0);grant=approve()
             val initialGeometry=AssistWire.geometry(grant.getJSONObject("geometry"));check(!host.engine.assist.authorizes(grant.getString("lease"),initialGeometry));host.send("accepted",JSONObject().put("lease",grant.getString("lease")));await("peer acknowledges current lease"){state{host.engine.assist.authorizes(grant.getString("lease"),initialGeometry)}};host.autoAcceptGrant=true;checks++
+            for(time in listOf(600001L,86400000L)){advanceHost(time);check(state{host.engine.assist.hosting&&host.engine.assist.authorizes(grant.getString("lease"),initialGeometry)});checks++}
             automation.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME);Thread.sleep(900);check(host.engine.assist.hosting);checks++
             target();await("external stop chip"){chipVisible()};capture("owner-stop-overlay")
             check(state{(stopChip() as TextView).currentTextColor==ThemePalette(0xFFFFC107.toInt()).onPrimary});ui{ThemeStore.save(i.targetContext,ThemeStore.DEFAULT)};checks++
@@ -105,6 +111,9 @@ internal object RemoteAssistTests {
                 return host.packets.last{it.optString("t")=="ack"&&it.optInt("s")==n&&it.optString("lease")==lease}
             }
             fun normalized(p:PointF):PointF{val geo=AssistWire.geometry(grant.getJSONObject("geometry"));return PointF(p.x/(geo.width-1),p.y/(geo.height-1))}
+            val beforeLegacy=host.packets.count{it.optString("t")=="ack"}
+            host.send("input",JSONObject().put("lease",grant.getString("lease")).put("ticket",host.tickets[grant.getString("lease")]).put("s",1).put("input",AssistWire.Input("tap",.25f,.3f).json()),version=1)
+            Thread.sleep(250);check(host.packets.count{it.optString("t")=="ack"}==beforeLegacy&&targetNode("合成点按目标")!!.text.toString()=="点按 1");checks++
             val touch=normalized(point(targetNode("合成点按目标")!!));check(command(AssistWire.Input("tap",touch.x,touch.y)).getString("result")=="ok");await("real remote tap"){targetNode("合成点按目标")?.text?.toString()=="点按 2"};checks++
             val long=normalized(point(targetNode("合成长按目标")!!));check(command(AssistWire.Input("long",long.x,long.y,duration=700)).getString("result")=="ok");await("real remote long press"){targetNode("合成长按目标")?.text?.toString()=="长按 1"};checks++
             val swipe=targetNode("合成滑动目标")!!;val area=Rect();swipe.getBoundsInScreen(area);val from=normalized(PointF(area.left+area.width()*.25f,area.top+area.height()*.8f));val to=normalized(PointF(area.left+area.width()*.25f,area.top+area.height()*.2f))
@@ -117,7 +126,7 @@ internal object RemoteAssistTests {
             ui{val old=Hub.callUser;try{Hub.callUser=JSONObject(old.toString()).put("bot",true);check(!host.engine.assist.authorizes(authorizedLease,authorizedGeometry))}finally{Hub.callUser=old}};checks++
             // Duplicate command numbers revoke instead of replaying a potentially destructive operation.
             host.send("input",JSONObject().put("lease",grant.getString("lease")).put("ticket",host.tickets[grant.getString("lease")]).put("s",sequence).put("input",AssistWire.Input("tap",touch.x,touch.y).json()))
-            await("replay revokes"){!host.engine.assist.hosting};checks++
+            await("replay revokes"){!host.engine.assist.hosting};checks++;advanceHost(0)
             grant=approve();target(true);await("password target"){targetNode("合成密码输入")!=null};localTap(point(targetNode("合成密码输入")!!));await("password focus revokes"){!host.engine.assist.hosting};checks++
             grant=approve();target();await("stop chip before revoke"){chipVisible()};val stopPoint=PointF();ui{val chip=stopChip()!!;val p=IntArray(2);chip.getLocationOnScreen(p);stopPoint.set(p[0]+chip.width-3f,p[1]+chip.height/2f)};localTap(stopPoint);await("owner stop revokes"){!host.engine.assist.hosting};checks++
             grant=approve();target();val notice=i.targetContext.getSystemService(NotificationManager::class.java).activeNotifications.first{it.id==108};notice.notification.actions.first{it.title.toString()=="停止共享"}.actionIntent.send()
@@ -125,7 +134,7 @@ internal object RemoteAssistTests {
             openMain();invoke(a!!,"releaseRenderers");host.close();fixture=null;ui{Hub.call=null;Hub.phase=""}
             checks+=AssistControllerTests.run(i,a!!,folder)
             val sha=MessageDigest.getInstance("SHA-256").digest(File(i.targetContext.applicationInfo.sourceDir).readBytes()).joinToString(""){"%02x".format(it.toInt()and 255)}
-            report=JSONObject().put("passed",true).put("checks",checks).put("api",Build.VERSION.SDK_INT).put("apkSha256",sha).put("widthDp",cfg.screenWidthDp).put("heightDp",cfg.screenHeightDp).put("phoneLayout",layout=="phone").put("actualSystemAccessibilityConsent",true).put("actualSystemProjectionConsent",true).put("contentRetrievalCapability",false).put("realOsTapLongSwipe",true).put("ownerStillControls",true).put("staleAndReplayRejected",true).put("localDtlsSctp",true).put("realUserCalls",0).put("physicalDevices",false)
+            report=JSONObject().put("passed",true).put("checks",checks).put("api",Build.VERSION.SDK_INT).put("apkSha256",sha).put("widthDp",cfg.screenWidthDp).put("heightDp",cfg.screenHeightDp).put("phoneLayout",layout=="phone").put("actualSystemAccessibilityConsent",true).put("actualSystemProjectionConsent",true).put("contentRetrievalCapability",false).put("realOsTapLongSwipe",true).put("ownerStillControls",true).put("staleAndReplayRejected",true).put("unlimitedCurrentShare",true).put("simulatedElapsedHours",24).put("ackTimeoutRetained",true).put("protocolV1Rejected",true).put("localDtlsSctp",true).put("realUserCalls",0).put("physicalDevices",false)
             return "PASS remote assistance consent, native gestures and revocation: $checks checks"
         }catch(e:Throwable){runCatching{capture("failure")};File(folder,"failure.txt").writeText(e.stackTraceToString());File(folder,"ui.txt").writeText(allNodes().joinToString("\n"){"${it.packageName}|${it.viewIdResourceName}|${it.className}|${it.text}|${it.contentDescription}"});throw e}
         finally{
