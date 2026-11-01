@@ -11,9 +11,10 @@
 
 ## 功能
 
-- **聊天**：文字、HTML 排版卡片、图片、语音和最大 25 MiB 文件；左右头像、输入状态、最近在线、未读与已读。
+- **聊天**：文字、HTML 排版卡片、图片、语音和最大 25 MiB 文件；左右头像、输入状态、最近在线、绿色在线点与Wi-Fi/4G/5G粗略网络类型、未读与已读。
 - **好友群聊**：右上角“＋”选择好友创建2至20人加密群，支持文字、图片、语音、文件、HTML和成员管理；新成员无此前消息/文件权限，详见 [群聊说明](GROUPS.md)。
 - **位置分享**：聊天“＋”→位置，选择发送位置或共享实时位置；全屏地图拖动选点、地点搜索/地址列表、命名与发送，无定位权限仍可手动选点。较新手机支持清晰矢量底图、中文优先标注与比例尺；实时共享使用顶部小按钮，显示参与者头像与加密集合点，通知可停止。系统地理服务可用时提供真实地点结果，无地图Key也可使用；详见 [位置分享](LOCATION_SHARING.md)。
+- **发送与阅读**：附件在输入区显示进度，可继续聊天并取消；上翻时提示新消息数量、快捷回到最新，失败消息直接点按重试。
 - **会话与草稿**：本机加密草稿（文字、引用、光标）、置顶、消息免打扰与连续消息列表；仅搜索本机保存的联系人、文字和文件名，支持定位上下文。
 - **消息操作**：深灰双排长按浮层、原生文字选区及部分复制、引用、删除/撤回、多选、批量删除和逐条转发；转发附件重新加密。
 - **输入与语音**：功能/表情抽屉、向右滑动引用；语音暂停续播、拖动与1/1.5/2倍速；录音试听、手动发送及当前页面失败重试，60秒上限不会自动发送。
@@ -37,6 +38,8 @@
 <p><img src="docs/images/group-info.png" width="230" alt="群资料与成员管理"> <img src="docs/images/chat-settings.png" width="230" alt="聊天设置与会话偏好"> <img src="docs/images/local-search.png" width="230" alt="本机搜索"></p>
 
 <p><img src="docs/images/input-tools.png" width="230" alt="原生功能和表情面板"> <img src="docs/images/voice-player.png" width="230" alt="语音进度与倍速"> <img src="docs/images/voice-preview.png" width="230" alt="录音试听和手动发送"></p>
+
+<p><img src="docs/images/voice-compact.png" width="230" alt="合成语音时长对应的紧凑气泡"> <img src="docs/images/inline-upload.png" width="230" alt="上传时继续聊天"> <img src="docs/images/network-online.png" width="230" alt="合成好友的绿色在线点和5G状态"></p>
 
 [会话体验对照、实现与验证范围](CHAT_EXPERIENCE.md)
 

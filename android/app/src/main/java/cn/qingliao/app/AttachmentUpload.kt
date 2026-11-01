@@ -14,7 +14,8 @@ import java.util.concurrent.atomic.AtomicInteger
 
 /** At most two running/four queued uploads. Cancellation never deletes the user's chosen file. */
 class AttachmentUpload(private val activity:Activity,private val uri:Uri,private val name:String,private val mime:String,
-    private val kind:String,private val peer:String,private val caption:String,private val showProgress:Boolean=true,private val guard:()->Boolean={true},private val messageQuote:JSONObject?=null,private val done:(JSONObject?,String?)->Unit) {
+    private val kind:String,private val peer:String,private val caption:String,private val showProgress:Boolean=true,private val guard:()->Boolean={true},private val messageQuote:JSONObject?=null,private val onProgress:((Update)->Unit)?=null,private val done:(JSONObject?,String?)->Unit) {
+    data class Update(val stage:String,val count:Long=0,val total:Long=0,val cancelable:Boolean=true)
     companion object {
         private val executor=ThreadPoolExecutor(2,2,30,TimeUnit.SECONDS,ArrayBlockingQueue<Runnable>(4))
         private val timers=Executors.newSingleThreadScheduledExecutor()
@@ -26,29 +27,33 @@ class AttachmentUpload(private val activity:Activity,private val uri:Uri,private
     @Volatile private var call:Call?=null
     @Volatile private var input:InputStream?=null
     private var lastUpdate=0L
+    private var lastStage=""
     private var shownStage=""
     private val displayName=name.take(180).map{if(it.isISOControl()||it=='/'||it=='\\'||it in '\u202a'..'\u202e'||it in '\u2066'..'\u2069')'_' else it}.joinToString("").ifBlank{"文件"}
+    val title get()=displayName
     val finished get()=state.get()!=0
-    val dialog=ProgressDialog(activity).apply{
+    val dialog by lazy{ProgressDialog(activity).apply{
         setTitle(if(kind=="voice")"发送语音" else if(kind=="image")"发送图片" else "发送文件")
         setMessage(displayName);setProgressStyle(ProgressDialog.STYLE_HORIZONTAL);max=100;isIndeterminate=true
         setCancelable(true);setCanceledOnTouchOutside(false);setOnCancelListener{cancel()}
         setButton(DialogInterface.BUTTON_NEGATIVE,"取消"){_,_->cancel()}
-    }
+    }}
     fun start() {
+        onProgress?.invoke(Update("排队等待"))
         if(showProgress)dialog.show()
-        try{executor.execute{run()}}catch(_:RejectedExecutionException){state.set(1);dialog.dismiss();done(null,"正在发送的附件较多，请稍后再试")}
+        try{executor.execute{run()}}catch(_:RejectedExecutionException){state.set(1);if(showProgress)dialog.dismiss();done(null,"正在发送的附件较多，请稍后再试")}
     }
-    fun cancel(message:String="已取消发送") {
-        if(!state.compareAndSet(0,1))return
+    fun cancel(message:String="已取消发送"):Boolean {
+        if(!state.compareAndSet(0,1))return false
         reason=message;call?.cancel()
         // Closing a document-provider stream may block, so never close it on the UI thread.
         timers.execute{runCatching{input?.close()}}
+        return true
     }
     private fun checkActive(){check(state.get()==0){reason};check(session.isNotEmpty()&&owner.isNotEmpty()&&Hub.token==session&&Hub.me.optString("id")==owner){"登录状态已改变"};check(guard()){"原消息或转发页面已不可用"}}
     private fun progress(stage:String,count:Long,total:Long) {
-        val now=SystemClock.elapsedRealtime();if(now-lastUpdate<120&&count!=total)return;lastUpdate=now
-        Hub.main.post{if(!activity.isDestroyed&&Hub.token==session&&state.get()==0){if(shownStage!=stage){shownStage=stage;dialog.setMessage(stage+"\n"+displayName)};if(dialog.isIndeterminate!=(total<=0))dialog.isIndeterminate=total<=0;if(total>0){val value=(count*100/total).toInt().coerceIn(0,100);if(dialog.progress!=value)dialog.progress=value}}}
+        val now=SystemClock.elapsedRealtime();if(lastStage==stage&&now-lastUpdate<120&&count!=total)return;lastUpdate=now;lastStage=stage
+        Hub.main.post{if(!activity.isDestroyed&&Hub.token==session&&state.get()==0){onProgress?.invoke(Update(stage,count,total));if(showProgress){if(shownStage!=stage){shownStage=stage;dialog.setMessage(stage+"\n"+displayName)};if(dialog.isIndeterminate!=(total<=0))dialog.isIndeterminate=total<=0;if(total>0){val value=(count*100/total).toInt().coerceIn(0,100);if(dialog.progress!=value)dialog.progress=value}}}}
     }
     private fun run() {
         var encrypted:File?=null;var uploaded="";var queuedClient="";var result:JSONObject?=null;var error:String?=null
@@ -71,7 +76,7 @@ class AttachmentUpload(private val activity:Activity,private val uri:Uri,private
                 override fun contentLength()=file.length()
                 override fun writeTo(sink:okio.BufferedSink){file.inputStream().use{stream->val buffer=ByteArray(65536);var sent=0L
                     while(true){checkActive();val count=stream.read(buffer);if(count<0)break;sink.write(buffer,0,count);sent+=count;progress("正在上传",sent,file.length())}
-                }}
+                };progress("正在确认上传",0,0)}
             }
             val request=Request.Builder().url(Hub.SERVER+"/api/uploads?recipient="+Uri.encode(peer)+"&name=encrypted.bin").header("Authorization","Bearer $session").post(body).build()
             val active=Hub.http.newCall(request);call=active
@@ -87,6 +92,7 @@ class AttachmentUpload(private val activity:Activity,private val uri:Uri,private
             // Linearize cancellation before durable queue entry. Once commit starts, the message
             // belongs to Outbox; cancelling a dialog cannot safely retract a possibly delivered item.
             check(state.compareAndSet(0,3)){reason}
+            Hub.main.post{if(Hub.token==session&&!activity.isDestroyed)onProgress?.invoke(Update("正在保存消息",cancelable=false))}
             result=Outbox.queue(payload,session,owner)
             state.set(2)
         }catch(e:Exception){error=if(state.get()==1)reason else e.message?:"附件发送失败"}
@@ -97,7 +103,7 @@ class AttachmentUpload(private val activity:Activity,private val uri:Uri,private
                 if(uploaded.isNotEmpty())runCatching{Hub.rawApi("DELETE","/api/storage/files/$uploaded",session=session)}
             }
             state.compareAndSet(0,1);state.compareAndSet(3,1)
-            Hub.main.post{dialog.dismiss();done(if(state.get()==2)result else null,error)}
+            Hub.main.post{if(showProgress)dialog.dismiss();done(if(state.get()==2)result else null,error)}
         }
     }
 }

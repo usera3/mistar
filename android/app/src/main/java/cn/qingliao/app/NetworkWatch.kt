@@ -11,6 +11,7 @@ class NetworkWatch(context:Context) {
         val active=manager.activeNetwork
         val available=active?.let{manager.getNetworkCapabilities(it)?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)}==true
         val changed=active!=previous;previous=active
+        NetworkPresence.refresh()
         Hub.networkChanged(available,changed)
     }
     private val callback=object:ConnectivityManager.NetworkCallback(){
@@ -19,5 +20,5 @@ class NetworkWatch(context:Context) {
         override fun onLost(network:Network){changed()}
         override fun onCapabilitiesChanged(network:Network,capabilities:NetworkCapabilities){changed()}
     }
-    fun start(){runCatching{manager.registerDefaultNetworkCallback(callback)}}
+    fun start(){runCatching{manager.registerDefaultNetworkCallback(callback)};Hub.main.post{NetworkPresence.refresh()}}
 }

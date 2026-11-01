@@ -46,6 +46,7 @@ object Hub {
     var me = JSONObject()
     var socket: WebSocket? = null
     var connected = false
+    private var networkPresenceSupported=false
     var listener: ((JSONObject) -> Unit)? = null
     var foreground = false
     var viewingPeer = ""
@@ -241,6 +242,10 @@ object Hub {
         if(changed)socket?.let{it.cancel();lost(it,token,0)}
         if(!connected)connect()
     }
+    fun localNetworkChanged(){
+        if(connected&&networkPresenceSupported&&token.isNotEmpty())socket?.send(NetworkPresence.packet().toString())
+        emit(JSONObject().put("event","network.state"))
+    }
     fun markCallReconnecting() {
         val active=call?:return
         if(callDeadline==null) {
@@ -300,7 +305,7 @@ object Hub {
         authDeadline?.let{main.removeCallbacks(it)}
         authDeadline=Runnable { if(epoch==connectionEpoch&&!connected)socket?.let{it.cancel();lost(it,expectedToken,0)} }.also{main.postDelayed(it,15000)}
         socket = http.newWebSocket(Request.Builder().url(SERVER.replace("https", "wss") + "/ws").build(), object : WebSocketListener() {
-            override fun onOpen(ws: WebSocket, response: Response) { if(token==expectedToken&&epoch==connectionEpoch)ws.send(JSONObject().put("token",expectedToken).toString()) else ws.close(1000,"stale") }
+            override fun onOpen(ws: WebSocket, response: Response) { if(token==expectedToken&&epoch==connectionEpoch)ws.send(JSONObject().put("token",expectedToken).put("network",NetworkPresence.kind).toString()) else ws.close(1000,"stale") }
             override fun onMessage(ws: WebSocket, text: String) {
                 if(token!=expectedToken||epoch!=connectionEpoch)return
                 try { val p = JSONObject(text)
@@ -356,8 +361,9 @@ object Hub {
                 if(p.optString("invite_id")==pendingInviteId) {pendingInvitePeer="";pendingInviteId="";pendingInviteUntil=0}
                 if(call==null)service?.update()
             }
-            "ready" -> { connected=true;reconnect=0;authDeadline?.let{main.removeCallbacks(it)};authDeadline=null;typingUntil.clear();saveMe(p.getJSONObject("user"));service?.update();resyncCall();LocalHistory.synchronize();Outbox.kick() }
+            "ready" -> { connected=true;networkPresenceSupported=p.optBoolean("presence_network");reconnect=0;authDeadline?.let{main.removeCallbacks(it)};authDeadline=null;typingUntil.clear();saveMe(p.getJSONObject("user"));service?.update();resyncCall();LocalHistory.synchronize();Outbox.kick() }
             "me.updated" -> saveMe(p.getJSONObject("user"))
+            "presence.self" -> saveMe(p.getJSONObject("user"))
             "membership.updated" -> p.optJSONObject("membership")?.let{saveMe(JSONObject(me.toString()).put("membership",it).put("member",it.optBoolean("active")))}
             "typing" -> {
                 val peer = p.optString("peer")

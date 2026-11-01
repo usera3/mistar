@@ -10,6 +10,8 @@ import android.widget.*
 internal class VoiceMessageView(context:Context,p:ThemePalette,private val key:String,private val caption:String,
     color:Int,secondary:Int,widthPx:Int,private val toggle:()->Unit,seek:(Int)->Unit,rate:()->Unit):LinearLayout(context){
     private val u=FormUi(context,p)
+    private val maximum=widthPx
+    private val hintedDuration=captionMillis(caption)
     private val control=FrameLayout(context).apply{contentDescription="播放语音";tag="voice.play:$key";isFocusable=true;setOnClickListener{toggle()}}
     private val glyph=Glyph(context,"play",color)
     private val label=u.text(caption.ifBlank{"语音"},13f,secondary)
@@ -22,14 +24,14 @@ internal class VoiceMessageView(context:Context,p:ThemePalette,private val key:S
     private var shownKind="play"
     private var currentState=VoicePlayback.State(key)
     init{
-        orientation=VERTICAL;minimumWidth=widthPx;layoutParams=LinearLayout.LayoutParams(widthPx,-2)
-        val main=u.row();control.addView(glyph,FrameLayout.LayoutParams(u.dp(19),u.dp(19),Gravity.CENTER));main.addView(control,u.lp(40,40))
-        main.addView(VoiceBars(context,color),LinearLayout.LayoutParams(0,u.dp(24),1f).apply{marginStart=u.dp(6);marginEnd=u.dp(8)})
+        orientation=VERTICAL;tag="voice.widget:$key";layoutParams=LinearLayout.LayoutParams(widthPx,-2)
+        val main=u.row();control.addView(glyph,FrameLayout.LayoutParams(u.dp(17),u.dp(17),Gravity.CENTER));main.addView(control,u.lp(32,32))
+        main.addView(VoiceBars(context,color),LinearLayout.LayoutParams(0,u.dp(14),1f).apply{marginStart=u.dp(3);marginEnd=u.dp(7)})
         label.maxLines=1;label.ellipsize=android.text.TextUtils.TruncateAt.END;label.maxWidth=(widthPx-u.dp(78)).coerceAtLeast(u.dp(38));main.addView(label,u.lp(-2,-2));addView(main,u.lp())
-        details.addView(progress,u.lp(-1,40));val bottom=u.row();bottom.addView(time,LinearLayout.LayoutParams(0,-2,1f));bottom.addView(speed,u.lp(44,40));details.addView(bottom,u.lp());details.visibility=View.GONE;addView(details,u.lp());addView(note,u.lp())
+        val bottom=u.row();time.maxLines=1;time.ellipsize=android.text.TextUtils.TruncateAt.END;bottom.addView(time,u.lp(34,32));bottom.addView(progress,LinearLayout.LayoutParams(0,u.dp(32),1f));speed.minimumHeight=u.dp(32);speed.minWidth=u.dp(36);bottom.addView(speed,u.lp(36,32));details.addView(bottom,u.lp());details.visibility=View.GONE;addView(details,u.lp());note.maxLines=2;addView(note,u.lp())
         progress.setOnSeekBarChangeListener(object:SeekBar.OnSeekBarChangeListener{
             override fun onStartTrackingTouch(bar:SeekBar){dragging=true;parent?.requestDisallowInterceptTouchEvent(true)}
-            override fun onProgressChanged(bar:SeekBar,value:Int,user:Boolean){if(user)time.text=clock(value)+" / "+clock(bar.max)}
+            override fun onProgressChanged(bar:SeekBar,value:Int,user:Boolean){if(user)time.text=clock(value)}
             override fun onStopTrackingTouch(bar:SeekBar){dragging=false;parent?.requestDisallowInterceptTouchEvent(false);seek(bar.progress)}
         })
         control.accessibilityDelegate=object:View.AccessibilityDelegate(){override fun onInitializeAccessibilityNodeInfo(host:View,info:AccessibilityNodeInfo){super.onInitializeAccessibilityNodeInfo(host,info);info.className=Button::class.java.name}}
@@ -47,15 +49,25 @@ internal class VoiceMessageView(context:Context,p:ThemePalette,private val key:S
         val kind=if(playing)"pause"else if(state.phase=="loading")"close"else"play"
         if(kind!=shownKind){shownKind=kind;control.removeAllViews();control.addView(Glyph(context,kind,glyph.color),FrameLayout.LayoutParams(u.dp(19),u.dp(19),Gravity.CENTER))}
         control.contentDescription=when(state.phase){"playing"->"暂停语音";"loading"->"取消加载语音";"paused"->"继续播放语音";else->"播放语音"}
-        // Keep the collapsed timestamp short, including large-font watch layouts.
+        // Idle/saved/ended messages stay as one short bubble. Only the active player expands one row.
         val saved=state.phase=="saved"&&state.position>0
-        val value=if(saved)clock(state.position)else if(state.duration>0)clock(state.duration)else caption.ifBlank{"语音"};if(label.text.toString()!=value)label.text=value
+        val duration=if(state.duration>0)state.duration else hintedDuration
+        val value=if(duration>0)if(duration<60000)"${(duration+999)/1000}″"else clock(duration)else"语音";if(label.text.toString()!=value)label.text=value
         label.contentDescription=if(saved)"从 "+clock(state.position)+" 继续，总时长 "+clock(state.duration)else "总时长 $value"
-        details.visibility=if(state.duration>0&&state.phase!="saved")View.VISIBLE else View.GONE;progress.isEnabled=state.duration>0&&state.phase!="loading"&&state.phase!="error"
-        if(!dragging){progress.max=state.duration.coerceAtLeast(1);progress.progress=state.position;val t=clock(state.position)+" / "+clock(state.duration);if(time.text.toString()!=t)time.text=t}
+        val expanded=state.duration>0&&state.phase in setOf("playing","paused")
+        val base=u.dp(if(u.tiny)80 else 92);val cap=minOf(maximum,u.dp(224));val seconds=(duration/1000f).coerceIn(0f,60f)
+        val collapsed=(base+(cap-base).coerceAtLeast(0)*seconds/60f).toInt().coerceAtMost(maximum)
+        val width=(if(expanded)maxOf(collapsed,u.dp(160))else collapsed).coerceAtMost(maximum)
+        if(minimumWidth!=width||layoutParams.width!=width){minimumWidth=width;layoutParams=layoutParams.apply{this.width=width}}
+        label.maxWidth=(width-u.dp(56)).coerceAtLeast(u.dp(24))
+        details.visibility=if(expanded)View.VISIBLE else View.GONE;progress.isEnabled=expanded
+        if(!dragging){progress.max=state.duration.coerceAtLeast(1);progress.progress=state.position;val t=clock(state.position);if(time.text.toString()!=t)time.text=t}
         speed.text=when(state.speed){1.5f->"1.5×";2f->"2×";else->"1×"};speed.contentDescription="播放速度 ${speed.text}，点击切换";speed.isEnabled=progress.isEnabled
         val hint=if(state.error.isNotEmpty())state.error else if(state.phase=="loading")"正在加载，点按取消"else""
         if(note.text.toString()!=hint)note.text=hint;note.visibility=if(hint.isEmpty())View.GONE else View.VISIBLE
     }
-    companion object{fun clock(ms:Int):String="%d:%02d".format(java.util.Locale.ROOT,(ms.coerceAtLeast(0)/60000),(ms.coerceAtLeast(0)/1000)%60)}
+    companion object{
+        fun captionMillis(value:String):Int{val seconds=Regex("^\\s*([0-9]{1,4})\\s*[″\"秒s]").find(value)?.groupValues?.get(1)?.toIntOrNull();if(seconds!=null)return seconds.coerceIn(0,3600)*1000;return 0}
+        fun clock(ms:Int):String="%d:%02d".format(java.util.Locale.ROOT,(ms.coerceAtLeast(0)/60000),(ms.coerceAtLeast(0)/1000)%60)
+    }
 }

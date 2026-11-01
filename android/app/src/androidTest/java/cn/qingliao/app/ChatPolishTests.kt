@@ -114,12 +114,17 @@ object ChatPolishTests {
             swipe(bubble(text),12*density,0f);check(field(a,"replyTarget")==null);swipe(bubble(text),64*density,0f,true);check(field(a,"replyTarget")==null);checks+=2
             swipe(bubble(text),64*density,0f);check((field(a,"replyTarget") as JSONObject).getString("id")==text.getString("id"));invoke(a,"hideKeyboard");capture("swipe-reply");checks++
             invoke(a,"beginMessageSelection",text);swipe(bubble(text),64*density,0f);check(field(a,"selecting")==true);invoke(a,"endMessageSelection");checks++
+            val short=JSONObject(voice.toString()).put("id",UUID.randomUUID().toString()).put("text","2″")
+            val long=JSONObject(voice.toString()).put("id",UUID.randomUUID().toString()).put("text","60″")
+            show(listOf(short,voice,long));val shortView=find("voice.widget:${short.getString("id")}|${short.getString("file_id")}")!!;val longView=find("voice.widget:${long.getString("id")}|${long.getString("file_id")}")!!
+            check(shortView.width<longView.width&&bubble(short).height<=52*density&&bubble(voice).height<=52*density);capture("voice-compact");checks++
             show();val stableEditor=editor();val stableBubble=bubble(voice)
             invoke(a,"playVoice",voice);await("voice playing"){state().phase=="playing"};check(state().duration in 23500..24500);Thread.sleep(350)
             invoke(a,"playVoice",voice);check(state().phase=="paused");val paused=state().position;Thread.sleep(300);check(kotlin.math.abs(state().position-paused)<100);checks++
             ui{controller().seek(8000)};await("seek complete"){field(controller(),"seeking")==false&&kotlin.math.abs(state().position-8000)<300};checks++
             ui{controller().cycleSpeed()};check(state().speed==1.5f&&state().phase=="paused"&&!controller().media!!.isPlaying);checks++
             invoke(a,"playVoice",voice);await("resume at speed"){state().phase=="playing"};check(controller().media!!.playbackParams.speed==1.5f);ui{controller().cycleSpeed()};check(state().speed==2f);ui{controller().cycleSpeed()};check(state().speed==1f&&editor()===stableEditor&&bubble(voice)===stableBubble);capture("voice-player");checks++
+            check(stableBubble.height<=90*density);checks++
             val manager=a.getSystemService(AudioManager::class.java);val competing=AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT).setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).build()).setOnAudioFocusChangeListener({ },Hub.main).build()
             ui{check(manager.requestAudioFocus(competing)==AudioManager.AUDIOFOCUS_REQUEST_GRANTED)};await("focus pauses playback"){state().phase=="paused"};ui{manager.abandonAudioFocusRequest(competing)};Thread.sleep(250);check(!controller().media!!.isPlaying);checks++
             val seek=find("voice.seek:${voice.getString("id")}|${voice.getString("file_id")}")!!;val quoteBefore=field(a,"replyTarget");swipe(seek,55*density,0f);check(field(a,"replyTarget")===quoteBefore);checks++

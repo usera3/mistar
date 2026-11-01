@@ -5,6 +5,8 @@ import java.util.Date
 import java.util.Locale
 
 object PresenceText {
+    const val ONLINE_COLOR=0xFF16844B.toInt()
+    fun dot(value:String,online:Boolean,offlineColor:Int):CharSequence=if(value.startsWith("●")||value.startsWith("○"))android.text.SpannableString(value).apply{setSpan(android.text.style.ForegroundColorSpan(if(online)ONLINE_COLOR else offlineColor),0,1,android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)}else value
     fun offline(lastSeen: Long, now: Long = System.currentTimeMillis()): String {
         if (lastSeen <= 0L) return "离线 · 可留言"
         val seconds = ((now - lastSeen).coerceAtLeast(0L)) / 1000

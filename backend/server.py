@@ -56,6 +56,7 @@ if 'avatar_id' not in {r['name'] for r in db.execute('PRAGMA table_info(users)')
     db.execute("ALTER TABLE users ADD COLUMN avatar_id TEXT NOT NULL DEFAULT ''")
     db.commit()
 online = {}
+NETWORK_KINDS={"","wifi","2g","3g","4g","5g","mobile","ethernet","vpn","other"}
 typing = {}
 TYPING_TTL = 5
 calls = {}
@@ -110,6 +111,9 @@ def user_public(uid, viewer=None):
             u['member']=membership.active(uid)
             if viewer==uid:u['membership']=membership.status(uid)
         u['online'] = bool(online.get(uid))
+        visible_network=viewer==uid or bool(viewer and row("SELECT 1 FROM friends WHERE owner=? AND peer=? AND state='accepted'",(viewer,uid)))
+        choices=[ws for ws in online.get(uid,()) if getattr(ws,'_network_kind','') and not ws.closed]
+        u['network']=getattr(max(choices,key=lambda ws:getattr(ws,'_network_at',0)), '_network_kind','') if u['online'] and visible_network and choices and not u.get('bot') else ''
         if viewer==uid and 'moderation' in globals():
             staff=moderation.staff(uid)
             u['administrator']=bool(staff)
@@ -167,6 +171,21 @@ async def emit(uid, data):
 async def close_socket(ws,code):
     try:await asyncio.wait_for(ws.close(code=code),2)
     except (ConnectionError,RuntimeError,asyncio.TimeoutError):pass
+
+
+def network_kind(value):
+    if not isinstance(value,str) or value not in NETWORK_KINDS:reject('网络类型不正确')
+    return value
+
+
+async def network_event(uid,ws,p):
+    limited('network-presence:'+uid,30,60)
+    if set(p)!={'event','network'}:reject('网络状态格式不正确')
+    kind=network_kind(p['network'])
+    if getattr(ws,'_network_kind','')==kind:return
+    ws._network_kind=kind;ws._network_at=time.monotonic()
+    await presence(uid)
+    await emit(uid,{'event':'presence.self','user':user_public(uid,uid)})
 
 
 async def presence(uid):
@@ -245,7 +264,7 @@ async def authentication(request, handler):
 def public_plaza_open(): return os.environ.get('QINGLIAO_PUBLIC_PLAZA', '0') == '1'
 
 
-async def health(request): return web.json_response({'ok': True, 'app': 'qingliao', 'version': '1.25.0', 'live_location':'encrypted-v1','live_location_rooms':True, 'groups':True, 'group_e2ee':'manifest-v1', 'email_code_login':True, 'password_reset_email_only':True, 'app_updates':True, 'membership':True,'moderation': True, 'require_email': security.require_email, 'require_e2ee': security.require_e2ee, 'bot_api': 'webhook-v1', 'bot_calls':True,'moments_media':True,'moments_public':public_plaza_open(),'moments_video_covers':True,'bot_calls_default_allowed':True,'call_busy_feedback':True})
+async def health(request): return web.json_response({'ok': True, 'app': 'qingliao', 'version': '1.26.0','presence_network':'coarse-v1', 'live_location':'encrypted-v1','live_location_rooms':True, 'groups':True, 'group_e2ee':'manifest-v1', 'email_code_login':True, 'password_reset_email_only':True, 'app_updates':True, 'membership':True,'moderation': True, 'require_email': security.require_email, 'require_e2ee': security.require_e2ee, 'bot_api': 'webhook-v1', 'bot_calls':True,'moments_media':True,'moments_public':public_plaza_open(),'moments_video_covers':True,'bot_calls_default_allowed':True,'call_busy_feedback':True})
 
 
 async def register(request):
@@ -934,10 +953,11 @@ async def websocket(request):
         if moderation.staff(uid) and moderation.staff(uid)['must_change']:reject('请先修改管理员初始密码',403)
         if len(online.get(uid, set())) >= guard.MAX_WS_USER: reject('此账号连接设备过多，请关闭其他设备后重试', 429)
         ws._session_token = token
+        ws._network_kind=network_kind(p.get('network',''));ws._network_at=time.monotonic()
         online.setdefault(uid, set()).add(ws)
         await callstate.restored(uid)
         write('UPDATE users SET last_seen=? WHERE id=?', (now(), uid))
-        await ws.send_json({'event': 'ready', 'user': user_public(uid, uid)})
+        await ws.send_json({'event': 'ready', 'user': user_public(uid, uid),'presence_network':True})
         if releases.current: await ws.send_json({'event':'app.update','version_code':releases.current['version_code']})
         await presence(uid)
         async for msg in ws:
@@ -949,6 +969,7 @@ async def websocket(request):
                     if not isinstance(p, dict): reject('信令格式不正确')
                     if p.get('event') == 'ping': await ws.send_json({'event': 'pong'})
                     elif p.get('event') == 'typing': await typing_event(uid, ws, p)
+                    elif p.get('event') == 'presence.network': await network_event(uid,ws,p)
                     else: await signaling(uid, p)
                 except ApiError as e:
                     await ws.send_json(dict(event='error',error=e.message,**getattr(e,'details',{})))
@@ -966,6 +987,7 @@ async def websocket(request):
                 if owner == uid and ws in typing.get((owner, peer), {}):
                     await set_typing(uid, peer, ws, False)
             online.get(uid, set()).discard(ws)
+            if online.get(uid):await presence(uid)
             if not online.get(uid):
                 online.pop(uid, None)
                 write('UPDATE users SET last_seen=? WHERE id=?', (now(), uid))

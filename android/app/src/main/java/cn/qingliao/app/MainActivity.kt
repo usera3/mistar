@@ -117,6 +117,15 @@ class MainActivity : Activity() {
     private var messageList: LinearLayout? = null
     private var messageScroll: ScrollView? = null
     private var latestMessage:TextView?=null
+    private val newMessageIds=linkedSetOf<String>()
+    private var positioningMessages=false
+    private var readTask:Runnable?=null
+    private var readInFlight=false
+    private var lastReadKey=""
+    private val retryingMessages=mutableSetOf<String>()
+    private var uploadTray:ChatUploadTray?=null
+    private data class UploadEntry(val id:String,val peer:String,val owner:String,val session:String,var update:AttachmentUpload.Update)
+    private val uploadEntries=linkedMapOf<AttachmentUpload,UploadEntry>()
     private val receiptLabels=mutableMapOf<String,TextView>()
     private var chatGeneration=0
     private var composer: EditText? = null
@@ -271,10 +280,10 @@ class MainActivity : Activity() {
             else if(peer==null)showHome()
             else showChat()
         }
-        if(Hub.token.isNotEmpty()){refresh();if(peer!=null&&!callScreen)loadVoiceTexts();if(!returningFromPhotoSave&&!returningFromPost)feed?.refresh()};returningFromPhotoSave=false;returningFromPost=false;root.post{if(!isDestroyed){if(voicePaused&&peer!=null&&!callScreen){voicePaused=false;renderMessages(false)};syncHtmlPreviews()}}
+        if(Hub.token.isNotEmpty()){refresh();if(peer!=null&&!callScreen)loadVoiceTexts();if(!returningFromPhotoSave&&!returningFromPost)feed?.refresh()};returningFromPhotoSave=false;returningFromPost=false;root.post{if(!isDestroyed){if(voicePaused&&peer!=null&&!callScreen){voicePaused=false;renderMessages(false)};syncHtmlPreviews();renderUploads();updateLatestButton()}}
     }
     override fun onPause() { if(Hub.rtc?.assist?.let{it.controlling||it.pending}==true)Hub.rtc?.assist?.stopControlling("已离开控制画面");inputPanel?.hide();stashDraft(true);conversationMenu?.dismiss(); resumed=false;finishTextSelection();messageMenu?.dismiss();forwardJob?.cancel();forwardDialog?.dismiss();batchDeleteCancel?.invoke();cancelVoiceText();dictation?.cancel();dictation=null;if(playingId.isNotEmpty()){voicePaused=true;stopPlayer()};pauseChatImages();stopTyping();super.onPause();Hub.foreground=false;Hub.viewingPeer="";if(recording!=null)stopRecording(false,true) }
-    override fun onDestroy() { grantedAction=null;if(recording!=null)stopRecording(false);clearReadyVoice();inputPanel?.hide();voicePlayback?.dispose();voicePlayback=null;stashDraft(true);conversationMenu?.dismiss(); authScreen?.dispose();authScreen=null; screenRequest?.let{ScreenSharing.cancelRequest(it)};screenRequest=null;screenApproval?.let{ScreenSharing.cancelRequest(it.first)};screenApproval=null;cancelVoiceText();releaseChatImages();activeUploads.toList().forEach{it.cancel("页面已关闭，已取消发送")};activeUploads.clear();dismissDialogs();feed?.dispose();stopTyping(); Hub.main.removeCallbacks(tick); if(Hub.listener===hubListener)Hub.listener=null;stopPlayer();releaseRenderers();releaseHtmlPreviews();actionSheet?.dismiss();super.onDestroy() }
+    override fun onDestroy() { grantedAction=null;if(recording!=null)stopRecording(false);clearReadyVoice();inputPanel?.hide();voicePlayback?.dispose();voicePlayback=null;stashDraft(true);conversationMenu?.dismiss(); authScreen?.dispose();authScreen=null; screenRequest?.let{ScreenSharing.cancelRequest(it)};screenRequest=null;screenApproval?.let{ScreenSharing.cancelRequest(it.first)};screenApproval=null;cancelVoiceText();releaseChatImages();activeUploads.toList().forEach{it.cancel("页面已关闭，已取消发送")};activeUploads.clear();uploadEntries.clear();readTask?.let{Hub.main.removeCallbacks(it)};readTask=null;dismissDialogs();feed?.dispose();stopTyping(); Hub.main.removeCallbacks(tick); if(Hub.listener===hubListener)Hub.listener=null;stopPlayer();releaseRenderers();releaseHtmlPreviews();actionSheet?.dismiss();super.onDestroy() }
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
         super.onConfigurationChanged(newConfig)
         if(isInPictureInPictureMode&&Hub.call==null){finish();return}
@@ -303,7 +312,7 @@ class MainActivity : Activity() {
     }
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
     private fun bg(color: Int, radius: Int = 16, border: Int? = null): GradientDrawable = GradientDrawable().apply { setColor(color); cornerRadius=dp(radius).toFloat(); if(border!=null) setStroke(dp(1),border) }
-    private fun text(value: String, size: Float = 15f, color: Int = ink, bold: Boolean = false) = TextView(this).apply {
+    private fun text(value: CharSequence, size: Float = 15f, color: Int = ink, bold: Boolean = false) = TextView(this).apply {
         this.text=value; textSize=size; setTextColor(color); if(bold) setTypeface(typeface,Typeface.BOLD); gravity=Gravity.CENTER_VERTICAL; includeFontPadding=false; layoutParams=LinearLayout.LayoutParams(-2,-2)
     }
     private fun col() = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }
@@ -356,7 +365,7 @@ class MainActivity : Activity() {
         chatHeader=null
         if(Build.VERSION.SDK_INT>=27){setShowWhenLocked(callScreen);setTurnScreenOn(callScreen)}
         else {val flags=WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON;if(callScreen)window.addFlags(flags)else window.clearFlags(flags)}
-        homeSignature="";receiptLabels.clear();latestMessage=null
+        homeSignature="";receiptLabels.clear();latestMessage=null;uploadTray=null;positioningMessages=false;readTask?.let{Hub.main.removeCallbacks(it)};readTask=null
         feed?.dispose(callScreen);feed=null
         stopTyping();if(callScreen)actionSheet?.window?.setWindowAnimations(0);actionSheet?.dismiss(); actionSheet=null; unreadBadge=null; contactStatusLabels.clear()
         releaseChatImages();releaseHtmlPreviews()
@@ -436,8 +445,8 @@ class MainActivity : Activity() {
         u.optBoolean("blocked") || !u.optBoolean("friend",true) -> "未添加好友 · 点右上角设置"
         u.optBoolean("bot") -> if(u.optBoolean("bot_ready"))"机器人 · API 服务" else "机器人暂不可用"
         !Hub.connected -> "正在连接…"
-        u.optBoolean("online") -> "在线"
-        else -> PresenceText.offline(u.optLong("last_seen"))
+        u.optBoolean("online") -> "● "+NetworkPresence.online(u.optString("network"))
+        else -> "● "+PresenceText.offline(u.optLong("last_seen"))
     }
     private fun updateStatusLabels() {
         if (!Hub.foreground) return
@@ -446,14 +455,15 @@ class MainActivity : Activity() {
             peerTitle?.let { title -> if(title.text.toString()!=name)title.text=name }
             val value = if (Hub.connected && Hub.peerIsTyping(u.optString("id"))) "对方正在输入…" else status(u)
             connectionLabel?.let { label ->
-                if (label.text.toString() != value) label.text = value
-                label.setTextColor(if (Hub.connected && (u.optBoolean("online") || Hub.peerIsTyping(u.optString("id")))) accent else muted)
+                if (label.text.toString() != value) label.text = PresenceText.dot(value,Hub.connected&&u.optBoolean("online"),muted)
+                label.setTextColor(if(Hub.connected&&Hub.peerIsTyping(u.optString("id")))accent else muted)
             }
         }
+        if(peer==null&&!callScreen)connectionLabel?.text=homeConnection()
         contactStatusLabels.forEach { (u, label) ->
             val value = status(u)
-            if (label.text.toString() != value) label.text = value
-            label.setTextColor(if (Hub.connected && u.optBoolean("online")) accent else muted)
+            if (label.text.toString() != value) label.text = PresenceText.dot(value,Hub.connected&&u.optBoolean("online"),muted)
+            label.setTextColor(muted)
         }
     }
     private fun inputChanged(value: CharSequence?) {
@@ -490,7 +500,10 @@ class MainActivity : Activity() {
         }.also{root.addView(it.view,lp(-1,-1))}
     }
 
-    private fun homeConnection() = if(Hub.me.optBoolean("admin_password_change_required"))"请先修改管理员初始密码" else if(Hub.connected)if(tab==0)"● 在线"else"● 已连接" else "○ 连接中…"
+    private fun homeConnection():CharSequence {
+        val value=if(Hub.me.optBoolean("admin_password_change_required"))"请先修改管理员初始密码"else if(Hub.connected)"● "+NetworkPresence.online(NetworkPresence.kind)else if(NetworkPresence.kind.isEmpty())"● 离线"else"● 连接中 · "+NetworkPresence.label()
+        return PresenceText.dot(value,Hub.connected,muted)
+    }
     private fun showHome(tabChange:Boolean=false) {
         clearReadyVoice()
         stashDraft(true);composerPeer=""
@@ -507,7 +520,7 @@ class MainActivity : Activity() {
             top.addView(portrait,lp(if(compact)34 else 42,if(compact)34 else 42))
             val identity=col().apply{setPadding(dp(10),0,dp(6),0)}
             identity.addView(text(Hub.me.optString("nickname","弥星"),if(tiny)16f else 19f,ink).apply{maxLines=1;ellipsize=android.text.TextUtils.TruncateAt.END},lp());space(identity,4)
-            connectionLabel=text(if(Hub.connected)"● 在线"else"○ 连接中…",if(tiny)10f else 11f,if(Hub.connected)accent else muted).apply{maxLines=1}
+            connectionLabel=text(homeConnection(),if(tiny)10f else 11f,muted).apply{maxLines=1;tag="home.presence"}
             identity.addView(connectionLabel,lp());top.addView(identity,LinearLayout.LayoutParams(0,-2,1f))
         }else if(tiny){
             val condensed=row();condensed.addView(headingText);condensed.addView(connectionLabel,LinearLayout.LayoutParams(0,-2,1f).apply{marginStart=dp(10)});top.addView(condensed,LinearLayout.LayoutParams(0,-2,1f))
@@ -678,7 +691,7 @@ class MainActivity : Activity() {
             item.addView(avatar(u,side))
             val info=col().apply{setPadding(dp(12),0,dp(8),0)}
             info.addView(text(displayName(u),if(compact)14f else 16f,ink,true).apply{maxLines=1;ellipsize=android.text.TextUtils.TruncateAt.END});space(info,5)
-            val statusLabel=text(status(u),12f,if(Hub.connected&&u.optBoolean("online"))accent else muted)
+            val statusLabel=text(PresenceText.dot(status(u),Hub.connected&&u.optBoolean("online"),muted),12f,muted).apply{tag="contact.presence:${u.optString("id")}"}
             info.addView(statusLabel);contactStatusLabels.add(u to statusLabel)
             item.addView(info,LinearLayout.LayoutParams(0,-2,1f));item.addView(Glyph(this,"arrow",muted),lp(15,15));group.addView(item,lp())
             if(i<friends.lastIndex)divider(group,14+side+12)
@@ -905,6 +918,7 @@ class MainActivity : Activity() {
     }
     private fun updateMessageSelection(){
         if(!selecting)return
+        latestMessage?.visibility=View.GONE
         val allowed=messages.filter{!it.optBoolean("pending")}.map{it.optString("id")}.toSet();selectedMessages.retainAll(allowed)
         selectionCount?.text="已选 ${selectedMessages.size}/20"
         selectionChecks.forEach{(id,v)->v.isChecked=id in selectedMessages}
@@ -1077,7 +1091,7 @@ class MainActivity : Activity() {
         if(ChatAddress.group(u.optString("id")))GroupDirectory.remember(u)
         if(readyVoice?.peer!=u.optString("id"))clearReadyVoice()
         stashDraft(true);composerPeer=""
-        chatGeneration++
+        chatGeneration++;newMessageIds.clear();lastReadKey=""
         if(recording!=null)stopRecording(false)
         stopPlayer();replyTarget=null;searchWindow=false;peer=u; Hub.viewingPeer=u.getString("id"); messages.clear(); hasMore=false
         motionDirection=1;showChat();cachedMessages(false);loadPending();if(Hub.connected)loadMessages(false);refreshRelationship()
@@ -1090,7 +1104,7 @@ class MainActivity : Activity() {
         top.addView(icon("back","返回消息") { leaveChat() })
         val info=col().apply { setPadding(dp(6),0,dp(8),0);minimumHeight=dp(if(compact)40 else 48);gravity=Gravity.CENTER_VERTICAL;contentDescription="聊天设置";setOnClickListener { people() } }
         peerTitle=text(if(compact)u.optString("nickname") else displayName(u),17f,ink,true).apply { maxLines=1; ellipsize=android.text.TextUtils.TruncateAt.END }; info.addView(peerTitle,lp()); space(info,4)
-        connectionLabel=text(status(u),11f,if(Hub.connected && u.optBoolean("online"))accent else muted).apply{maxLines=1;ellipsize=android.text.TextUtils.TruncateAt.END}; info.addView(connectionLabel)
+        connectionLabel=text(PresenceText.dot(status(u),Hub.connected&&u.optBoolean("online"),muted),11f,muted).apply{tag="chat.presence";maxLines=1;ellipsize=android.text.TextUtils.TruncateAt.END}; info.addView(connectionLabel)
         top.addView(info,LinearLayout.LayoutParams(0,-2,1f))
         if(!ChatAddress.group(u.optString("id"))&&(!u.optBoolean("bot") || u.optBoolean("bot_calls_enabled")&&u.optBoolean("bot_ready"))) {
             top.addView(icon("phone","语音通话",accent) { beginCall(false) }.apply { touch(this,canvas,22) },lp(if(compact)40 else 48,if(compact)40 else 48).apply { marginEnd=dp(if(compact)0 else 6) })
@@ -1099,7 +1113,7 @@ class MainActivity : Activity() {
         top.addView(icon("more",if(compact)"聊天操作" else "聊天设置",muted) { if(compact)chatMenu() else people() },lp(if(compact)40 else 48,if(compact)40 else 48)); chatHeader=top;root.addView(top)
         divider(root)
         if(u.optBoolean("bot")&&!compact)root.addView(text(if(compact)"机器人 · 开发者处理消息" else "第三方机器人 · 内容由服务器中转并交给开发者处理",if(compact)10f else 11f,muted).apply{setPadding(dp(if(compact)8 else 18),dp(if(compact)4 else 9),dp(8),dp(if(compact)4 else 9));setBackgroundColor(soft)},lp())
-        messageScroll=ScrollView(this).apply { isFillViewport=true; clipToPadding=false; setBackgroundColor(canvas); isVerticalScrollBarEnabled=false; setPadding(dp(if(compact)6 else 14),0,dp(if(compact)6 else 14),dp(if(compact)6 else 16)); setOnScrollChangeListener { _,_,_,_,_ -> syncHtmlPreviews();if(nearLatest())latestMessage?.visibility=View.GONE } }
+        messageScroll=ScrollView(this).apply { isFillViewport=true; clipToPadding=false; setBackgroundColor(canvas); isVerticalScrollBarEnabled=false; setPadding(dp(if(compact)6 else 14),0,dp(if(compact)6 else 14),dp(if(compact)6 else 16)); setOnScrollChangeListener { _,_,_,_,_ -> syncHtmlPreviews();updateLatestButton() } }
         messageScroll!!.setOnTouchListener{_,event->
             if(event.actionMasked==android.view.MotionEvent.ACTION_DOWN&&textActionMode!=null){
                 val selected=messageTextViews[textSelectionMessage];val bounds=Rect();val point=IntArray(2)
@@ -1109,10 +1123,11 @@ class MainActivity : Activity() {
         }
         messageList=col(); messageScroll!!.addView(messageList)
         val chatFrame=FrameLayout(this);chatFrame.addView(messageScroll,FrameLayout.LayoutParams(-1,-1));root.addView(chatFrame,LinearLayout.LayoutParams(-1,0,1f))
-        latestMessage=button("回到最新消息") { latestMessage?.visibility=View.GONE;if(searchWindow){searchWindow=false;messages.clear();cachedMessages(false);loadMessages(false);loadPending()}else scrollLatest(true) }.apply { visibility=View.GONE;contentDescription="回到最新消息";elevation=dp(3).toFloat() }
-        chatFrame.addView(latestMessage,FrameLayout.LayoutParams(-2,dp(42),Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { bottomMargin=dp(12) })
+        latestMessage=button("↓ 回到最新消息") { newMessageIds.clear();latestMessage?.visibility=View.GONE;if(searchWindow){searchWindow=false;messages.clear();cachedMessages(false);loadMessages(false);loadPending()}else scrollLatest(true) }.apply { tag="chat.latest";visibility=View.GONE;contentDescription="回到最新消息";elevation=dp(3).toFloat();textSize=if(compact)11f else 12f;background=bg(palette.surface,18,line);setTextColor(accent);setPadding(dp(12),0,dp(12),0) }
+        chatFrame.addView(latestMessage,FrameLayout.LayoutParams(-2,dp(if(compact)36 else 40),Gravity.BOTTOM or Gravity.END).apply { bottomMargin=dp(12);marginEnd=dp(8) })
         divider(root)
         val compose=col().apply { background=BrandUi.card(this@MainActivity,palette,20);setPadding(dp(if(compact)4 else 8),dp(if(compact)3 else 6),dp(if(compact)4 else 8),dp(3)) }
+        uploadTray=ChatUploadTray(this,palette);compose.addView(uploadTray,lp());renderUploads()
         recordBar=row().apply{background=bg(soft,14);setPadding(dp(8),dp(2),dp(2),dp(2));visibility=View.GONE;tag="composer.recording"}
         recordLabel=text("正在录音  00:00",if(compact)11f else 13f,accent);recordBar!!.addView(recordLabel,LinearLayout.LayoutParams(0,-2,1f))
         recordBar!!.addView(icon("close","取消录音"){stopRecording(false)},lp(36,44))
@@ -1273,32 +1288,40 @@ class MainActivity : Activity() {
         Hub.job({ Hub.api("GET",historyPath(id)+before) }, { result ->
             if(peer?.optString("id")!=id||generation!=chatGeneration||session!=Hub.token)return@job
             if(stamp!=LocalData.epoch(Hub.me.optString("id"))){loadMessages(older);return@job}
-            val list=result.getJSONArray("messages")
-            val batch=(0 until list.length()).map { list.getJSONObject(it) }
-            if(older)messages.addAll(0,batch.filter { m -> messages.none { it.optString("id")==m.optString("id") } }) else {
-                val live=messages.filter { !it.optBoolean("local_cache") && (it.optBoolean("pending") || it.optLong("created")>=(batch.lastOrNull()?.optLong("created")?:0L)&&batch.none { m -> m.optString("id")==it.optString("id") }) }
-                messages.clear();messages.addAll(batch);messages.addAll(live);messages.sortBy { it.optLong("created") }
+            if(searchWindow&&!older){updateLatestButton();return@job}
+            val follow=!older&&nearLatest()&&!selecting&&textActionMode==null
+            val list=result.getJSONArray("messages");val batch=(0 until list.length()).map{list.getJSONObject(it)}
+            if(older)messages.addAll(0,batch.filter{m->messages.none{it.optString("id")==m.optString("id")}})
+            else if(!follow&&messages.isNotEmpty()){
+                // Reconnection must update the current history window without replacing it by the tail.
+                val tail=messages.maxOfOrNull{it.optLong("created")}?:0L
+                for(m in batch){val index=messages.indexOfFirst{it.optString("id")==m.optString("id")}
+                    if(index>=0)messages[index]=m else{if(m.optLong("created")>tail&&m.optString("sender")!=Hub.me.optString("id")){newMessageIds.add(m.optString("id"));while(newMessageIds.size>100)newMessageIds.remove(newMessageIds.first())};messages.add(m)}
+                }
+            }else{
+                val live=messages.filter{!it.optBoolean("local_cache")&&(it.optBoolean("pending")||it.optLong("created")>=(batch.lastOrNull()?.optLong("created")?:0L)&&batch.none{m->m.optString("id")==it.optString("id")})}
+                messages.clear();messages.addAll(batch);messages.addAll(live)
             }
-            hasMore=result.optBoolean("has_more"); renderMessages(!older,older)
-            Hub.io.execute { try { Hub.rawApi("POST",readPath(id),session=session) } catch(_:Exception){} }
-        }, { if(generation==chatGeneration&&session==Hub.token)toast(it) })
+            messages.sortBy{it.optLong("created")};hasMore=if(older||follow)result.optBoolean("has_more")else hasMore||result.optBoolean("has_more")
+            renderMessages(follow,older);scheduleRead()
+        },{if(generation==chatGeneration&&session==Hub.token)toast(it)})
     }
     private fun renderMessages(scroll: Boolean = true,older: Boolean=false) {
         finishTextSelection();messageTextViews.clear();locationCards.clear()
         messageMenu?.dismiss();messageBubbles.clear();selectionChecks.clear()
         val parent=messageList ?: return
         val viewport=messageScroll ?: return
-        val oldHeight=parent.height;val oldY=viewport.scrollY
+        val oldHeight=parent.height;val oldY=viewport.scrollY;positioningMessages=true
         releaseChatImages();releaseHtmlPreviews();receiptLabels.clear();voiceTextPanels.clear();voiceViews.clear();parent.removeAllViews()
         if(hasMore)parent.addView(text("查看更早的消息",12f,accent).apply { gravity=Gravity.CENTER;setPadding(0,dp(18),0,dp(18));setOnClickListener { loadMessages(true) } },lp())
-        if(messages.isEmpty()){parent.addView(text("从一句问候开始吧",13f,muted).apply { gravity=Gravity.CENTER;setPadding(0,dp(40),0,dp(40)) },lp());return}
+        if(messages.isEmpty()){parent.addView(text("从一句问候开始吧",13f,muted).apply { gravity=Gravity.CENTER;setPadding(0,dp(40),0,dp(40)) },lp());positioningMessages=false;updateLatestButton();return}
         messages.forEachIndexed { index,m -> addMessageRow(parent,m,if(index==0)0L else messages[index-1].optLong("created")) }
         updateMessageSelection()
         parent.doOnPreDraw {
             if(parent===messageList){
                 if(scroll)viewport.scrollTo(0,(parent.height+viewport.paddingBottom-viewport.height).coerceAtLeast(0))
                 else viewport.scrollTo(0,if(older)oldY+(parent.height-oldHeight).coerceAtLeast(0)else oldY)
-                syncHtmlPreviews()
+                positioningMessages=false;syncHtmlPreviews();updateLatestButton()
             }
         }
     }
@@ -1370,6 +1393,7 @@ class MainActivity : Activity() {
             }
             "voice" -> {
                 val f=m.optJSONObject("file");val key=voiceKey(m)
+                bubble.setPadding(dp(if(compact)8 else 12),dp(6),dp(if(compact)8 else 12),dp(6))
                 val widget=VoiceMessageView(this,palette,key,m.optString("text","语音"),bubbleInk,bubbleMuted,maxWidth,{playVoice(m)},{value->if(voicePlayback?.activeKey==key)voicePlayback?.seek(value)},{if(voicePlayback?.activeKey==key)voicePlayback?.cycleSpeed()})
                 voiceViews[key]=widget;widget.render(voicePlayback?.state(key)?:VoicePlayback.State(key));bubble.addView(widget)
                 bubble.contentDescription="播放语音";bubble.setOnClickListener{if(f!=null)playVoice(m)}
@@ -1386,7 +1410,9 @@ class MainActivity : Activity() {
             val receipt=row().apply { gravity=Gravity.END; setPadding(0,dp(if(compact)3 else 6),dp(2),0) }
             val clock=text(SimpleDateFormat("HH:mm",Locale.CHINA).format(Date(created)),10f,muted);receipt.addView(clock)
             val readLabel=text(" · "+if(m.optBoolean("pending"))when(m.optString("send_state")){"blocked"->"发送失败 · 点按重试";"failed"->"等待重试";"sending"->"发送中";else->"待发送"} else if(ChatAddress.group(m.optString("group_id"))&&m.optInt("read_count")>0)"${m.optInt("read_count")}人已读"else if(m.optBoolean("read"))"已读" else "已发送",10f,if(m.optBoolean("read"))accent else muted).apply{this.maxWidth=(maxBubbleWidth-clock.paint.measureText(clock.text.toString()).toInt()-dp(2)).coerceAtLeast(dp(50));maxLines=2;ellipsize=android.text.TextUtils.TruncateAt.END}
-            receipt.addView(readLabel);receiptLabels[m.optString("id")]=readLabel;if(m.optBoolean("pending")){readLabel.setOnClickListener{messageActions(m)};readLabel.contentDescription="待发消息操作"};body.addView(receipt)
+            receipt.addView(readLabel);receiptLabels[m.optString("id")]=readLabel;if(m.optBoolean("pending")){val owner=Hub.me.optString("id");val session=Hub.token;val target=peer?.optString("id").orEmpty();val client=m.optString("client_id");val failed=m.optString("send_state") in setOf("blocked","failed")
+                readLabel.tag="chat.retry.$client";if(failed){readLabel.minimumHeight=dp(30);readLabel.setPadding(dp(4),0,dp(4),0);readLabel.gravity=Gravity.CENTER_VERTICAL}
+                readLabel.setOnClickListener{if(Hub.token==session&&Hub.me.optString("id")==owner&&peer?.optString("id")==target&&!isDestroyed&&!isFinishing){if(failed)retryMessage(m,owner,session,target)else messageActions(m)}};readLabel.contentDescription=if(failed)"重试发送这条消息"else"待发消息操作"};body.addView(receipt)
         }
         holder.addView(body,bodyParams)
         if(mine)holder.addView(person)
@@ -1520,24 +1546,48 @@ class MainActivity : Activity() {
         },{if(generation==chatGeneration){searchWindow=false;toast(it)}})
     }
     private fun nearLatest():Boolean { val scroll=messageScroll?:return true;return (messageList?.height?:0)+scroll.paddingBottom-scroll.height-scroll.scrollY<dp(80) }
-    private fun scrollLatest(smooth:Boolean) { val scroll=messageScroll?:return;val list=messageList?:return;list.doOnPreDraw { if(messageList===list){val y=(list.height+scroll.paddingBottom-scroll.height).coerceAtLeast(0);if(smooth&&Motion.enabled())scroll.smoothScrollTo(0,y)else scroll.scrollTo(0,y);syncHtmlPreviews()} } }
+    private fun scrollLatest(smooth:Boolean) { val scroll=messageScroll?:return;val list=messageList?:return;list.doOnPreDraw { if(messageList===list){val y=(list.height+scroll.paddingBottom-scroll.height).coerceAtLeast(0);if(smooth&&Motion.enabled())scroll.smoothScrollTo(0,y)else scroll.scrollTo(0,y);syncHtmlPreviews();updateLatestButton()} } }
+    private fun updateLatestButton(){
+        if(positioningMessages)return
+        val view=latestMessage?:return
+        if(peer==null||callScreen||selecting||textActionMode!=null){view.visibility=View.GONE;return}
+        if(!searchWindow&&nearLatest()){newMessageIds.clear();view.visibility=View.GONE;scheduleRead();return}
+        val count=newMessageIds.size;val value=if(count>0)"↓ ${if(count>99)"99+"else count}条新消息"else"↓ 回到最新消息"
+        view.text=value;view.contentDescription="回到最新消息"+if(count>0)"，${if(count>99)"99+"else count}条新消息"else"";view.visibility=View.VISIBLE
+    }
+    private fun rememberNewMessage(m:JSONObject){if(m.optString("sender")==Hub.me.optString("id")||m.optBoolean("pending"))return;val id=m.optString("id");if(id.isNotEmpty()){newMessageIds.add(id);while(newMessageIds.size>100)newMessageIds.remove(newMessageIds.first())};updateLatestButton()}
+    private fun scheduleRead(){
+        if(!resumed||!Hub.foreground||!Hub.connected||callScreen||searchWindow||selecting||positioningMessages||!nearLatest()||readInFlight)return
+        val target=peer?.optString("id")?:return;val owner=Hub.me.optString("id");val session=Hub.token;val generation=chatGeneration
+        val tail=messages.lastOrNull{!it.optBoolean("pending")&&it.optString("sender")!=owner}?.optString("id").orEmpty();if(tail.isEmpty())return
+        val key="$session:$target:$tail";if(lastReadKey==key)return
+        readTask?.let{Hub.main.removeCallbacks(it)}
+        readTask=Runnable{readTask=null;if(Hub.token!=session||Hub.me.optString("id")!=owner||peer?.optString("id")!=target||chatGeneration!=generation||!resumed||!Hub.foreground||!Hub.connected||callScreen||searchWindow||selecting||!nearLatest()||readInFlight)return@Runnable
+            readInFlight=true;Hub.io.execute{val success=runCatching{Hub.rawApi("POST",readPath(target),session=session)}.isSuccess;Hub.main.post{readInFlight=false;if(success){if(Hub.token==session&&peer?.optString("id")==target&&generation==chatGeneration)lastReadKey=key;scheduleRead()}}}
+        }.also{Hub.main.postDelayed(it,250)}
+    }
+    private fun retryMessage(m:JSONObject,owner:String,session:String,target:String){
+        val client=m.optString("client_id");if(client.isEmpty()||Hub.token!=session||Hub.me.optString("id")!=owner||peer?.optString("id")!=target||messages.none{it.optBoolean("pending")&&it.optString("client_id")==client&&it.optString("sender")==owner}||!retryingMessages.add(client))return
+        receiptLabels[m.optString("id")]?.text=" · 正在重试…"
+        Hub.job({check(Hub.token==session&&Hub.me.optString("id")==owner);Outbox.retry(client);JSONObject()},{retryingMessages.remove(client);if(Hub.token==session&&peer?.optString("id")==target)loadPending()},{retryingMessages.remove(client);if(Hub.token==session&&peer?.optString("id")==target){loadPending();toast(it)}})
+    }
     private fun appendMessage(m: JSONObject) {
         if(m.optBoolean("removed")){messages.removeAll{it.optBoolean("pending")&&it.optString("client_id")==m.optString("client_id")};renderMessages(false);return}
         val own=m.optString("sender")==Hub.me.optString("id")
         if(m.optBoolean("pending")&&own&&messages.any{!it.optBoolean("pending")&&it.optString("sender")==Hub.me.optString("id")&&it.optString("client_id")==m.optString("client_id")})return
         val pendingIndex=messages.indexOfFirst{it.optBoolean("pending")&&own&&it.optString("client_id")==m.optString("client_id")}
-        if(pendingIndex>=0){messages[pendingIndex]=m;messages.sortBy{it.optLong("created")};renderMessages(false);if(own)scrollLatest(true);return}
+        if(pendingIndex>=0){val follow=!searchWindow&&nearLatest();messages[pendingIndex]=m;messages.sortBy{it.optLong("created")};renderMessages(false);if(follow)scrollLatest(true);return}
         if(messages.any { it.optString("id")==m.optString("id") })return
         if(searchWindow){
             if(own){searchWindow=false;messages.clear();loadMessages(false)}
-            else {latestMessage?.visibility=View.VISIBLE;return}
+            else {rememberNewMessage(m);return}
         }
         val previous=messages.lastOrNull();val follow=!selecting&&textActionMode==null&&(nearLatest()||m.optString("sender")==Hub.me.optString("id"))
         val incremental=!callScreen&&messageList!=null&&previous!=null&&m.optLong("created")>=previous.optLong("created")
         messages.add(m);messages.sortBy { it.optLong("created") }
         if(callScreen)return
         if(incremental){val view=addMessageRow(messageList!!,m,previous!!.optLong("created"));if(follow)Motion.reveal(view,y=8f,duration=190)}else renderMessages(false)
-        if(follow){latestMessage?.visibility=View.GONE;scrollLatest(true)}else latestMessage?.let { if(it.visibility!=View.VISIBLE){it.visibility=View.VISIBLE;Motion.reveal(it,y=5f,duration=180)} }
+        if(follow){newMessageIds.clear();latestMessage?.visibility=View.GONE;scrollLatest(true)}else{rememberNewMessage(m);latestMessage?.let{Motion.reveal(it,y=5f,duration=180)}}
     }
     private fun emojis(){toggleInputPanel("emoji")}
     private fun permission(permissions: Array<String>, action: () -> Unit) {
@@ -1606,17 +1656,25 @@ class MainActivity : Activity() {
         }
     }
     private val activeUploads=mutableSetOf<AttachmentUpload>()
+    private fun renderUploads(){
+        val owner=Hub.me.optString("id");val session=Hub.token;val target=peer?.optString("id")?:return
+        uploadTray?.display(uploadEntries.filter{(task,e)->e.owner==owner&&e.session==session&&e.peer==target&&task in activeUploads}.map{(task,e)->ChatUploadTray.Item(e.id,task.title,e.update){
+            if(Hub.token==session&&Hub.me.optString("id")==owner&&peer?.optString("id")==target&&task.cancel()){uploadEntries.remove(task);renderUploads()}
+        }})
+    }
     private fun uploadFile(uri: Uri,name: String,mime: String,kind: String,recipient: String,caption: String,quote:JSONObject?=null,onDone: (() -> Unit)?=null,onResult:((JSONObject?,String?)->Unit)?=null) {
-        val session=Hub.token
+        val session=Hub.token;val owner=Hub.me.optString("id");val entry=UploadEntry(UUID.randomUUID().toString(),recipient,owner,session,AttachmentUpload.Update("排队等待"))
         lateinit var task:AttachmentUpload
-        task=AttachmentUpload(this,uri,name,mime,kind,recipient,caption,messageQuote=quote?.let{JSONObject(it.toString())}){message,error ->
-            activeUploads.remove(task);onDone?.invoke();onResult?.invoke(message,error)
-            if(Hub.token==session&&!isDestroyed&&!isFinishing) {
-                if(message!=null){if(peer?.optString("id")==recipient)appendMessage(message)else toast("附件已加入待发消息")}
-                else if(error!=null)toast(error)
+        task=AttachmentUpload(this,uri,name,mime,kind,recipient,caption,showProgress=false,messageQuote=quote?.let{JSONObject(it.toString())},onProgress={update->
+            if(Hub.token==session&&Hub.me.optString("id")==owner&&!isDestroyed){entry.update=update;renderUploads()}
+        }){message,error ->
+            activeUploads.remove(task);uploadEntries.remove(task);renderUploads();onDone?.invoke();onResult?.invoke(message,error)
+            if(Hub.token==session&&Hub.me.optString("id")==owner&&!isDestroyed&&!isFinishing) {
+                if(message!=null){if(peer?.optString("id")==recipient)appendMessage(message)else toast("附件已加入原聊天的发送队列")}
+                else if(error!=null&&error!="已取消发送")toast(error)
             }
         }
-        activeUploads.add(task);trackDialog(task.dialog);task.start()
+        activeUploads.add(task);uploadEntries[task]=entry;renderUploads();task.start()
     }
     private fun startRecording() {
         if(!contactGuard()||Hub.call!=null||recording!=null||!resumed||!Hub.foreground||isDestroyed||isFinishing)return
@@ -2086,16 +2144,17 @@ class MainActivity : Activity() {
             }
             "post.changed" -> feed?.onEvent(event)
             "typing" -> if(event.optString("peer")==peer?.optString("id")) updateStatusLabels()
+            "network.state", "presence.self" -> updateStatusLabels()
             "message" -> {
                 val m=event.getJSONObject("message"); val id=peer?.optString("id")
                 if(id!=null && id==ChatAddress.peer(m,Hub.me.optString("id"))) {
                     appendMessage(m)
-                    if(m.optString("sender")!=Hub.me.optString("id") && Hub.foreground){val session=Hub.token;Hub.io.execute { try { Hub.rawApi("POST",readPath(id),session=session) } catch(_:Exception){} }}
+                    if(m.optString("sender")!=Hub.me.optString("id"))scheduleRead()
                 }
                 refresh()
             }
             "messages.read" -> if(event.optString("peer")==peer?.optString("id")) { val at=event.optLong("at");messages.filter { !it.optBoolean("pending")&&it.optString("sender")==Hub.me.optString("id")&&it.optLong("created")<=at }.forEach { m -> m.put("read",true);receiptLabels[m.optString("id")]?.apply { text=" · 已读";setTextColor(accent) } } }
-            "connection" -> { stopTyping(); updateStatusLabels(); if(peer==null)connectionLabel?.text="○  正在重新连接…" }
+            "connection" -> {stopTyping();updateStatusLabels()}
             "call.waiting", "call.ringing", "call.accepted", "call.resynced" -> showCall()
             "call.reconnecting", "call.audio" -> { callClock?.text=callClockText();updateCallControls();updateCallChrome();updatePipParams() }
             "call.other_device" -> {if(callScreen){if(peer!=null)showChat()else showHome()};toast("通话已在其他设备处理")}

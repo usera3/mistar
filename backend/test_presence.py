@@ -61,10 +61,10 @@ async def main():
                     p = await r.json(); assert r.status == 200, p
                     return p
 
-            async def ws(token):
+            async def ws(token,network=None):
                 connection = await http.ws_connect(url + '/ws')
                 sockets.append(connection)
-                await connection.send_json({'token': token})
+                await connection.send_json(dict(token=token,**({'network':network} if network is not None else {})))
                 await event(connection, 'ready')
                 return connection
 
@@ -77,10 +77,30 @@ async def main():
                 at, bt, ct = a['token'], b['token'], c['token']
                 await api('POST', '/friends/request', at, {'peer': bid})
                 await api('POST', '/friends/respond', bt, {'peer': aid, 'accept': True})
-                wa, wb, wc = await ws(at), await ws(bt), await ws(ct)
+                wa, wb, wc = await ws(at,"wifi"), await ws(bt,"4g"), await ws(ct)
                 state = (await api('GET', '/contacts', bt))['contacts'][0]
                 assert state['online'] is True and state['last_seen'] > 0
                 print('PASS legacy users schema upgraded; connected friend is online')
+                assert state['network']=='wifi'
+                assert (await api('GET','/users?q='+aid,ct))['user']['network']==''
+                await wa.send_json({'event':'presence.network','network':'5g'})
+                assert (await event(wb,'presence'))['user']['network']=='5g'
+                assert (await event(wa,'presence.self'))['user']['network']=='5g'
+                await no_event(wc,'presence')
+                for bad in ({'event':'presence.network','network':'my-private-wifi'}, {'event':'presence.network','network':'wifi','ssid':'private'}, {'event':'presence.network','network':['wifi']}, {'event':'presence.network','network':'4g','uid':bid}):
+                    await wa.send_json(bad);await event(wa,'error')
+                    assert (await api('GET','/contacts',bt))['contacts'][0]['network']=='5g'
+                extra=await ws(at,'4g')
+                assert (await event(wb,'presence'))['user']['network']=='4g'
+                await extra.close()
+                assert (await event(wb,'presence'))['user']['network']=='5g'
+                await wa.send_json({'event':'presence.network','network':'wifi'})
+                assert (await event(wb,'presence'))['user']['network']=='wifi'
+                await event(wa,'presence.self')
+                with sqlite3.connect(database) as checkdb:
+                    assert not any('network' in row[1] for row in checkdb.execute('PRAGMA table_info(users)'))
+                print('PASS enum-only network, self/friend push, stranger privacy, per-device fallback and no network DB column')
+
 
                 async def typing(connection, active):
                     await connection.send_json({'event': 'typing', 'peer': bid, 'active': active})
@@ -113,7 +133,7 @@ async def main():
                 await wa2.close()
                 await event(wb, 'typing', active=False)
                 offline = (await event(wb, 'presence'))['user']
-                assert offline['online'] is False and before <= offline['last_seen'] <= int(time.time() * 1000)
+                assert offline['network']=='' and offline['online'] is False and before <= offline['last_seen'] <= int(time.time() * 1000)
                 last_seen = offline['last_seen']
                 stranger = await api('GET', '/users?q=' + aid, ct)
                 assert stranger['user']['last_seen'] == 0
@@ -123,7 +143,7 @@ async def main():
                 process.terminate(); process.wait(timeout=10)
                 await start()
                 restored = (await api('GET', '/contacts', bt))['contacts'][0]
-                assert restored['last_seen'] == last_seen and restored['online'] is False
+                assert restored['last_seen'] == last_seen and restored['online'] is False and restored['network']==''
                 legacy_user = await api('GET', '/users?q=legacy_seed', bt)
                 assert legacy_user['user']['last_seen'] == 0
                 assert (await api('GET', '/messages/' + aid, bt))['messages'][0]['text'] == 'Typing has been sent'
