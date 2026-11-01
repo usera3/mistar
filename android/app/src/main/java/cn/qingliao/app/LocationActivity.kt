@@ -74,15 +74,15 @@ class LocationActivity:Activity(){
     }
     private fun buildHeader(){
         val row=u.row().apply{setPadding(u.dp(12),u.dp(6),u.dp(12),u.dp(8))}
-        power=floating(if(mode in setOf("live","liveStart"))"power"else"back",if(mode in setOf("live","liveStart"))"结束位置共享"else"取消",mode in setOf("live","liveStart")){
+        power=floating(if(mode in setOf("live","liveStart"))"power"else"back",if(mode in setOf("live","liveStart"))"结束位置共享"else"取消"){
             if(mode=="live"&&ownService()!=null)confirmEnd()else finish()
         };row.addView(power,u.lp(44,44));row.addView(View(this),LinearLayout.LayoutParams(0,1,1f))
         submit=u.button(if(mode=="meeting")"设为集合点"else"发送","location.send"){send(false)}.apply{minimumWidth=u.dp(72);setPadding(u.dp(14),u.dp(6),u.dp(14),u.dp(6))};row.addView(submit,u.lp(-2,44))
-        if(u.tiny)row.addView(floating("target","定位到位置标记",mode in setOf("live","liveStart")){recenterLocation()},u.lp(40,44).apply{leftMargin=u.dp(4)})
-        row.addView(floating(if(mode in setOf("live","liveStart"))"minimize"else"more",if(mode in setOf("live","liveStart"))"返回聊天"else"更多位置操作",mode in setOf("live","liveStart")){if(mode in setOf("live","liveStart"))finish()else more()},u.lp(44,44).apply{leftMargin=u.dp(8)})
+        start=u.button("开始共享","location.start"){beginLive()}.apply{visibility=View.GONE;textSize=13f;minimumWidth=u.dp(86);setPadding(u.dp(12),0,u.dp(12),0);setOnLongClickListener{if(mode=="liveStart")chooseDuration();true}};row.addView(start,u.lp(-2,40))
+        if(u.tiny)row.addView(floating("target","定位到位置标记"){recenterLocation()},u.lp(40,44).apply{leftMargin=u.dp(4)})
+        row.addView(floating(if(mode in setOf("live","liveStart"))"minimize"else"more",if(mode in setOf("live","liveStart"))"返回聊天"else"更多位置操作"){if(mode in setOf("live","liveStart"))finish()else more()},u.lp(44,44).apply{leftMargin=u.dp(8)})
         top.addView(row,u.lp());participants=u.row().apply{gravity=Gravity.CENTER;tag="location.participants"};participantHost=HorizontalScrollView(this).apply{isHorizontalScrollBarEnabled=false;isFillViewport=true;addView(participants)};top.addView(participantHost,u.lp(-1,56))
-        state=u.text(if(mode=="view")""else"正在定位…",12f,if(mode in setOf("live","liveStart"))Color.WHITE else p.muted).apply{tag="location.state";gravity=Gravity.CENTER;maxLines=2;ellipsize=TextUtils.TruncateAt.END;setPadding(u.dp(12),u.dp(6),u.dp(12),u.dp(10));accessibilityLiveRegion=View.ACCESSIBILITY_LIVE_REGION_POLITE};top.addView(state,u.lp())
-        start=u.button("开始共享位置 · 1小时","location.start"){beginLive()}.apply{visibility=View.GONE;setOnLongClickListener{if(mode=="liveStart")chooseDuration();true}};top.addView(start,u.lp().apply{setMargins(u.dp(36),u.dp(2),u.dp(36),u.dp(10))})
+        state=u.text(if(mode=="view")""else"正在定位…",11f,p.ink).apply{tag="location.state";gravity=Gravity.CENTER;maxLines=1;ellipsize=TextUtils.TruncateAt.END;setPadding(u.dp(12),u.dp(5),u.dp(12),u.dp(5));background=BrandUi.rounded(this@LocationActivity,p.surface,18);accessibilityLiveRegion=View.ACCESSIBILITY_LIVE_REGION_POLITE};top.addView(state,u.lp(-2,-2).apply{gravity=Gravity.CENTER_HORIZONTAL;setMargins(u.dp(14),u.dp(2),u.dp(14),u.dp(6))})
     }
     private fun buildPanel(){
         val handle=FrameLayout(this).apply{tag="location.panel.handle";minimumHeight=u.dp(if(u.tiny)12 else 24);addView(View(this@LocationActivity).apply{background=BrandUi.rounded(this@LocationActivity,p.line,4)},FrameLayout.LayoutParams(u.dp(32),u.dp(4),Gravity.CENTER))}
@@ -95,13 +95,14 @@ class LocationActivity:Activity(){
         rows=u.col();panel.addView(ScrollView(this).apply{tag="location.places";isVerticalScrollBarEnabled=false;addView(rows)},LinearLayout.LayoutParams(-1,0,1f))
     }
     private fun applyMode(){
-        val isLive=mode in setOf("live","liveStart");panel.visibility=if(isLive)View.GONE else View.VISIBLE;participantHost.visibility=if(isLive)View.VISIBLE else View.GONE
-        window.statusBarColor=if(u.tiny){if(isLive)Color.rgb(58,56,71)else p.canvas}else Color.TRANSPARENT;window.navigationBarColor=if(u.tiny)p.surface else Color.TRANSPARENT
-        top.background=if(isLive)GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,intArrayOf(0xa8000000.toInt(),0x65000000,Color.TRANSPARENT))else null
+        val isLive=mode in setOf("live","liveStart");panel.visibility=if(isLive)View.GONE else View.VISIBLE;participantHost.visibility=if(mode=="live"&&participants.childCount>0)View.VISIBLE else View.GONE
+        window.statusBarColor=if(u.tiny)p.canvas else Color.TRANSPARENT;window.navigationBarColor=if(u.tiny)p.surface else Color.TRANSPARENT
+        top.background=null
         submit.visibility=if(mode in setOf("send","meeting"))View.VISIBLE else View.GONE;start.visibility=if(mode=="liveStart")View.VISIBLE else View.GONE;flag.visibility=if(mode=="live")View.VISIBLE else View.GONE
         recenter.visibility=if(u.tiny)View.GONE else View.VISIBLE
         map.mode(if(mode in setOf("send","meeting"))"pick"else if(isLive)"live"else"view");searchContainer.visibility=if(mode=="view")View.GONE else View.VISIBLE
-        if(isLive)window.decorView.systemUiVisibility=window.decorView.systemUiVisibility and View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR.inv() else window.decorView.systemUiVisibility=window.decorView.systemUiVisibility or View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+        window.decorView.systemUiVisibility=window.decorView.systemUiVisibility or View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+        if(mode=="liveStart")start.text=if(u.tiny)"开始共享"else"开始共享 · "+listOf("15分钟","1小时","8小时")[listOf(900,3600,28800).indexOf(duration)]
         updateLayout()
     }
     private fun updateLayout(){
@@ -221,10 +222,11 @@ class LocationActivity:Activity(){
             val badge=badges.getOrPut(uid){MapPersonBadge(this,p,JSONObject(user.toString())){if(valid()&&resumed)renderRoom()}};val parent=badge.parent as? android.view.ViewGroup;parent?.removeView(badge);val opaque="p$index";badge.setOnClickListener{focused=uid;map.focus(opaque)};participants.addView(badge,u.lp(42,42).apply{setMargins(u.dp(4),0,u.dp(4),0)})
             entry.optJSONObject("location")?.let{location->actorArray.put(JSONObject().put("key",opaque).put("name",user.optString("nickname","共享成员")).put("avatar",badge.data()).put("lat",location.getDouble("lat")).put("lon",location.getDouble("lon")));if(focused==uid||point==null||uid==owner&&focused.isEmpty()){point=JSONObject(location.toString());map.setPoint(point!!)}}
         }
+        participantHost.visibility=if(entries.isNotEmpty())View.VISIBLE else View.GONE
         map.actors(actorArray);map.meeting(LocationSessions.meeting(peer));val stale=entries.any{it.optBoolean("disconnected")||it.optJSONObject("location")?.let{v->System.currentTimeMillis()-v.optLong("at")>45000}==true};state.text=if(stale)"部分位置暂未更新"else if(ownService()!=null)"你正在共享位置 · ${entries.size}人"else if(entries.isNotEmpty())"${entries.size}人正在共享位置"else"当前没有人在共享位置"
-        if(ownService()==null){start.visibility=View.VISIBLE;start.text="共享我的位置";start.isEnabled=true;start.alpha=1f;start.setOnClickListener{mode="liveStart";intent.putExtra("mode",mode);applyMode();locate(true)}}else start.visibility=View.GONE
+        if(ownService()==null){start.visibility=View.VISIBLE;start.text=if(u.tiny)"加入共享"else"共享我的位置";start.isEnabled=true;start.alpha=1f;start.setOnClickListener{mode="liveStart";intent.putExtra("mode",mode);applyMode();locate(true)}}else start.visibility=View.GONE
     }
-    private fun chooseDuration(){dialog=AlertDialog.Builder(this).setTitle("共享时长").setSingleChoiceItems(arrayOf("15分钟","1小时","8小时"),listOf(900,3600,28800).indexOf(duration)){d,n->duration=listOf(900,3600,28800)[n];start.text="开始共享位置 · "+listOf("15分钟","1小时","8小时")[n];d.dismiss()}.show()}
+    private fun chooseDuration(){dialog=AlertDialog.Builder(this).setTitle("共享时长").setSingleChoiceItems(arrayOf("15分钟","1小时","8小时"),listOf(900,3600,28800).indexOf(duration)){d,n->duration=listOf(900,3600,28800)[n];applyMode();d.dismiss()}.show()}
     private fun confirmEnd(){dialog=LocationSheets.end(this,{valid()}){val service=ownService();if(service!=null)service.end()else if(live.isNotEmpty()&&LocationSessions.get(live)?.getJSONObject("share")?.optString("owner")==owner)Hub.io.execute{runCatching{Hub.rawApi("DELETE","/api/locations/$live",session=session)}};finish()}}
     private fun openMeeting(){if(!valid())return;startActivityForResult(Intent(this,LocationActivity::class.java).putExtra("peer",peer).putExtra("peer_info",peerInfo.toString()).putExtra("mode","meeting").apply{point?.let{putExtra("center",it.toString())}},221)}
     private fun restoreMeeting(){val token=session;Hub.io.execute{runCatching{LocalData.messages(owner,peer,200)}.getOrNull()?.let{values->Hub.main.post{if(Hub.token==token&&valid()){for(n in 0 until values.length())LocationSessions.observeMeeting(values.getJSONObject(n));renderRoom()}}}}}

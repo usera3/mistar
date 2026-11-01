@@ -33,16 +33,21 @@ class LocationMapView(private val activity:Activity,private val p:ThemePalette):
                 val uri=request.url
                 if(request.method!="GET")return blocked()
                 if(uri.scheme=="https"&&uri.host=="appassets.androidplatform.net"&&uri.port in listOf(-1,443)&&uri.query==null){
-                    val asset=mapOf("/assets/location-map/index.html" to "text/html","/assets/location-map/leaflet.js" to "application/javascript","/assets/location-map/leaflet.css" to "text/css")[uri.encodedPath]?:return blocked()
-                    return WebResourceResponse(asset,"UTF-8",activity.assets.open("location-map/"+uri.lastPathSegment))
+                    val relative=uri.encodedPath.orEmpty().removePrefix("/assets/location-map/")
+                    if(relative.startsWith("vector/")){val remote=Uri.parse(MapVectorTiles.origin+relative.removePrefix("vector/"));if(!MapVectorTiles.accepts(remote)||!allowed())return blocked();return try{local(if(remote.lastPathSegment=="planet.json")"application/json"else"application/x-protobuf",MapVectorTiles.fetch(remote,this@LocationMapView){allowed()})}catch(e:Exception){tileFailure=e.javaClass.simpleName+":"+e.message.orEmpty().take(60);blocked()}}
+                    if(uri.encodedPath=="/assets/location-map/config.js"){val vector=android.os.Build.VERSION.SDK_INT>=30&&activity.resources.configuration.smallestScreenWidthDp>=320;return local("application/javascript",("window.MISTAR_VECTOR="+vector+";").toByteArray())}
+                    val asset=mapOf("index.html" to "text/html","leaflet.js" to "application/javascript","leaflet.css" to "text/css","maplibre-gl-csp.js" to "application/javascript","maplibre-gl-csp-worker.js" to "application/javascript","maplibre-gl.css" to "text/css","map.js" to "application/javascript","streets.json" to "application/json","ofm-sprite.json" to "application/json","ofm-sprite@2x.json" to "application/json","ofm-sprite.png" to "image/png","ofm-sprite@2x.png" to "image/png")[relative]
+                        ?:if(Regex("fonts/Noto%20Sans%20Regular/(0-255|256-511|512-767|768-1023|8192-8447|65280-65535)\\.pbf").matches(relative))"application/x-protobuf"else return blocked()
+                    return local(asset,activity.assets.open("location-map/"+Uri.decode(relative)).use{it.readBytes()})
                 }
+                if(MapVectorTiles.accepts(uri))return if(!allowed())blocked()else try{local(if(uri.lastPathSegment=="planet.json")"application/json"else"application/x-protobuf",MapVectorTiles.fetch(uri,this@LocationMapView){allowed()})}catch(e:Exception){tileFailure=e.javaClass.simpleName;blocked()}
                 val tile=MapTiles.parse(uri)?:return blocked()
                 if(!allowed())return blocked()
                 return try{val bytes=MapTiles.fetch(tile.first,tile.second,tile.third,this@LocationMapView){allowed()};WebResourceResponse("image/png",null,ByteArrayInputStream(bytes))}catch(e:Exception){tileFailure=e.javaClass.simpleName;blocked()}
             }
             override fun shouldOverrideUrlLoading(view:WebView,request:WebResourceRequest):Boolean {
                 if(request.url.toString()==page&&request.method=="GET")return false
-                if(request.hasGesture()&&request.url.toString() in setOf("https://www.openstreetmap.org/copyright","https://leafletjs.com/")&&allowed())runCatching{activity.startActivity(Intent(Intent.ACTION_VIEW,request.url))}
+                if(request.hasGesture()&&request.url.toString() in setOf("https://www.openstreetmap.org/copyright","https://www.openmaptiles.org/","https://openfreemap.org/","https://leafletjs.com/")&&allowed())runCatching{activity.startActivity(Intent(Intent.ACTION_VIEW,request.url))}
                 return true
             }
             override fun onPageFinished(view:WebView,url:String){if(!disposed&&!pageFailed&&url==page){ready=true;rendered="";web.visibility=View.VISIBLE;error.visibility=View.GONE;configure();syncVisible();paint();if(allowed()){web.evaluateJavascript("window.resumeMap();window.setActors($actors);window.setMeeting($meeting)",null);selection?.let{web.evaluateJavascript("window.selectPoint($it)",null)}}}}
@@ -56,6 +61,7 @@ class LocationMapView(private val activity:Activity,private val p:ThemePalette):
     private fun load(){if(disposed)return;pageGeneration++;pageFailed=false;ready=false;rendered="";paintedActors="";paintedMeeting="";error.visibility=View.GONE;web.visibility=View.VISIBLE;web.loadUrl(page)}
     private fun pageError(){if(disposed)return;pageFailed=true;ready=false;rendered="";web.stopLoading();web.visibility=View.INVISIBLE;error.visibility=View.VISIBLE}
     private fun blocked()=WebResourceResponse("text/plain","UTF-8",403,"Blocked",mapOf("Cache-Control" to "no-store"),ByteArrayInputStream(ByteArray(0)))
+    private fun local(type:String,bytes:ByteArray)=WebResourceResponse(type,if(type.startsWith("image/")||type=="application/x-protobuf")null else"UTF-8",200,"OK",mapOf("Access-Control-Allow-Origin" to "https://appassets.androidplatform.net"),ByteArrayInputStream(bytes))
     private fun allowed()=active&&!disposed&&Hub.token==session&&Hub.me.optString("id")==owner
     private fun configure(){if(ready&&!disposed)web.evaluateJavascript("window.configureMap(${JSONObject.quote(mode)},$padding,${JSONObject.quote(ThemeStore.hex(p.accent))},$cover)",null)}
     fun mode(value:String){require(value in listOf("view","pick","live"));mode=value;configure()}
@@ -70,9 +76,9 @@ class LocationMapView(private val activity:Activity,private val p:ThemePalette):
     fun interaction(done:(JSONObject)->Unit){val expected=pageGeneration;if(ready&&allowed())web.evaluateJavascript("JSON.stringify(window.mapState.interaction||{})"){raw->if(allowed()&&expected==pageGeneration)runCatching{JSONObject(org.json.JSONTokener(raw).nextValue() as String).put("_page",expected)}.getOrNull()?.let{done(it)}}}
     fun setPoint(value:JSONObject){LocationPayload.validate(value);point=JSONObject().put("lat",value.getDouble("lat")).put("lon",value.getDouble("lon")).put("accuracy",value.getDouble("accuracy")).put("approximate",value.getBoolean("approximate")).put("label",value.getString("label")).put("color",ThemeStore.hex(p.accent));syncVisible();paint()}
     private fun paint(){if(!ready||!allowed())return;val value=point?.toString()?:return;if(value==rendered)return;rendered=value;web.evaluateJavascript("window.setPosition($value)",null)}
-    fun syncVisible(){if(disposed)return;val next=resumed&&isAttachedToWindow&&getGlobalVisibleRect(android.graphics.Rect())&&Hub.token==session&&Hub.me.optString("id")==owner;if(next!=active){active=next;if(active){web.onResume();rendered="";paint();web.evaluateJavascript("window.resumeMap&&window.resumeMap()",null)}else{MapTiles.cancel(this);web.onPause()}}}
+    fun syncVisible(){if(disposed)return;val next=resumed&&isAttachedToWindow&&getGlobalVisibleRect(android.graphics.Rect())&&Hub.token==session&&Hub.me.optString("id")==owner;if(next!=active){active=next;if(active){web.onResume();rendered="";paint();web.evaluateJavascript("window.resumeMap&&window.resumeMap()",null)}else{web.evaluateJavascript("window.pauseMap&&window.pauseMap()",null);MapTiles.cancel(this);MapVectorTiles.cancel(this);web.onPause()}}}
     fun resume(){resumed=true;syncVisible()}
-    fun pause(){resumed=false;active=false;MapTiles.cancel(this);web.onPause()}
-    fun dispose(){if(disposed)return;disposed=true;active=false;resumed=false;MapTiles.cancel(this);web.stopLoading();removeView(web);web.removeAllViews();web.destroy()}
+    fun pause(){resumed=false;active=false;if(!disposed)web.evaluateJavascript("window.pauseMap&&window.pauseMap()",null);MapTiles.cancel(this);MapVectorTiles.cancel(this);web.onPause()}
+    fun dispose(){if(disposed)return;disposed=true;active=false;resumed=false;MapTiles.cancel(this);MapVectorTiles.cancel(this);web.stopLoading();removeView(web);web.removeAllViews();web.destroy()}
     override fun onDetachedFromWindow(){pause();super.onDetachedFromWindow()}
 }

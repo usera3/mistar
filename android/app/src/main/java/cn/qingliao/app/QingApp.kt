@@ -143,6 +143,7 @@ object Hub {
         ConversationState.clearMemory()
         LocationShareService.instance?.end();LocationSessions.clear()
         val mapCacheClient=MapTiles.client;mapCacheClient.dispatcher.cancelAll();io.execute{runCatching{mapCacheClient.cache?.evictAll()}}
+        val vectorCacheClient=MapVectorTiles.client;vectorCacheClient.dispatcher.cancelAll();io.execute{runCatching{vectorCacheClient.cache?.evictAll()}}
         GroupDirectory.clear()
         val privateScreens=activities.keys.filter{it !is MainActivity}.toList()
         val mainScreens=activities.keys.filterIsInstance<MainActivity>().toList()

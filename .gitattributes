@@ -9,3 +9,10 @@
 android/app/src/main/assets/location-map/leaflet.js -text whitespace=cr-at-eol
 android/app/src/main/assets/location-map/leaflet.css -text whitespace=cr-at-eol
 android/app/src/main/assets/location-map/LICENSE -text whitespace=cr-at-eol
+
+# Preserve pinned third-party vector renderer, style/icon and font-license bytes.
+android/app/src/main/assets/location-map/maplibre-gl* -text whitespace=cr-at-eol
+android/app/src/main/assets/location-map/*-LICENSE.* -text whitespace=cr-at-eol
+# Keep the original pinned OFL whitespace rather than editing the upstream license.
+android/app/src/main/assets/location-map/NOTO-OFL.txt -text whitespace=-blank-at-eol,cr-at-eol
+*.pbf binary

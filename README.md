@@ -13,7 +13,7 @@
 
 - **聊天**：文字、HTML 排版卡片、图片、语音和最大 25 MiB 文件；左右头像、输入状态、最近在线、未读与已读。
 - **好友群聊**：右上角“＋”选择好友创建2至20人加密群，支持文字、图片、语音、文件、HTML和成员管理；新成员无此前消息/文件权限，详见 [群聊说明](GROUPS.md)。
-- **位置分享**：聊天“＋”→位置，选择发送位置或共享实时位置；全屏地图拖动选点、地点搜索/地址列表、命名与发送，无定位权限仍可手动选点。实时共享显示参与者头像与加密集合点，通知可停止。系统地理服务可用时提供真实地点结果，无地图Key也可使用；详见 [位置分享](LOCATION_SHARING.md)。
+- **位置分享**：聊天“＋”→位置，选择发送位置或共享实时位置；全屏地图拖动选点、地点搜索/地址列表、命名与发送，无定位权限仍可手动选点。较新手机支持清晰矢量底图、中文优先标注与比例尺；实时共享使用顶部小按钮，显示参与者头像与加密集合点，通知可停止。系统地理服务可用时提供真实地点结果，无地图Key也可使用；详见 [位置分享](LOCATION_SHARING.md)。
 - **会话与草稿**：本机加密草稿（文字、引用、光标）、置顶、消息免打扰与连续消息列表；仅搜索本机保存的联系人、文字和文件名，支持定位上下文。
 - **消息操作**：深灰双排长按浮层、原生文字选区及部分复制、引用、删除/撤回、多选、批量删除和逐条转发；转发附件重新加密。
 - **输入与语音**：功能/表情抽屉、向右滑动引用；语音暂停续播、拖动与1/1.5/2倍速；录音试听、手动发送及当前页面失败重试，60秒上限不会自动发送。
@@ -30,7 +30,7 @@
 
 <p><img src="docs/images/login.png" width="230" alt="手机登录界面"> <img src="docs/images/watch-login.png" width="230" alt="Android 9 手表登录界面"></p>
 
-<p><img src="docs/images/location-preview.png" width="230" alt="合成坐标的全屏地图选点"> <img src="docs/images/location-detail.png" width="230" alt="应用内位置快照地图"> <img src="docs/images/live-location.png" width="230" alt="合成账号实时位置与头像标记"></p>
+<p><img src="docs/images/location-preview.png" width="230" alt="合成坐标的全屏地图选点"> <img src="docs/images/live-start-compact.png" width="230" alt="顶部小按钮开始位置共享"> <img src="docs/images/live-location.png" width="230" alt="合成账号实时位置与头像标记"></p>
 
 <p><img src="docs/images/conversations.png" width="230" alt="新版平铺消息首页"> <img src="docs/images/create-group.png" width="230" alt="选择好友创建群聊"> <img src="docs/images/group-chat.png" width="230" alt="合成账号群聊"></p>
 
