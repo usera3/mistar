@@ -20,11 +20,11 @@ object Outbox {
     fun pending(owner:String,p:JSONObject):JSONObject = JSONObject().put("id","local:"+p.getString("client_id")).put("client_id",p.getString("client_id"))
         .put("sender",owner).put("recipient",p.getString("recipient")).put("type",p.getString("type")).put("text",p.optString("text"))
         .put("created",p.optLong("local_created",System.currentTimeMillis())).put("pending",true).put("send_state",p.optString("local_state","queued"))
-        .put("send_error",p.optString("local_error")).apply{if(ChatAddress.group(p.optString("recipient")))put("group_id",p.getString("recipient"));p.optJSONObject("private_file")?.let{put("file",it);put("file_id",it.optString("id"))};p.optJSONObject("quote")?.let{put("quote",it)};p.optJSONObject("location")?.let{put("location",it)}}
+        .put("send_error",p.optString("local_error")).apply{if(ChatAddress.group(p.optString("recipient")))put("group_id",p.getString("recipient"));p.optJSONObject("private_file")?.let{put("file",it);put("file_id",it.optString("id"))};p.optJSONObject("quote")?.let{put("quote",it)};p.optJSONObject("location")?.let{put("location",it)};for(key in listOf("location_role","location_source","location_address"))if(p.has(key))put(key,p.get(key))}
     private fun enqueue(p:JSONObject,session:String,owner:String,clearDraft:Boolean=false):JSONObject {
         require(Hub.token==session&&Hub.me.optString("id")==owner){"登录状态已改变"}
         val inner=JSONObject().put("type",p.getString("type")).put("text",p.optString("text"));p.optJSONObject("private_file")?.let{inner.put("file",it)}
-        p.optJSONObject("quote")?.let{inner.put("quote",it)};p.optJSONObject("location")?.let{inner.put("location",it)}
+        p.optJSONObject("quote")?.let{inner.put("quote",it)};p.optJSONObject("location")?.let{inner.put("location",it)};for(key in listOf("location_role","location_source","location_address"))if(p.has(key))inner.put(key,p.get(key))
         GroupDirectory.seed(p)
         PayloadRules.validate(inner,p.optString("file_id"),if(ChatAddress.group(p.getString("recipient")))null else setOf(owner,p.getString("recipient")))
         return if(clearDraft)ConversationState.queueText(owner,session,JSONObject(p.toString()))else LocalData.queue(owner,JSONObject(p.toString()))

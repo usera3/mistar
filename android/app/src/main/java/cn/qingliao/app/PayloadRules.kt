@@ -18,6 +18,9 @@ object PayloadRules {
         }
         require(!inner.has("quote")||inner.optJSONObject("quote")!=null){"引用格式不正确"}
         if(inner.has("location")){require(kind=="text"&&inner.optJSONObject("location")!=null);LocationPayload.validate(inner.getJSONObject("location"));require(text==LocationPayload.text(inner.getJSONObject("location"))){"位置描述不一致"}}
+        if(inner.has("location_role"))require(inner.optString("location_role")=="meeting"&&inner.has("location")&&!inner.getJSONObject("location").has("live_id"))
+        if(inner.has("location_source"))require(inner.optString("location_source")=="map"&&inner.has("location")&&!inner.getJSONObject("location").has("live_id"))
+        if(inner.has("location_address"))require(inner.get("location_address") is String&&inner.getString("location_address").length<=180&&inner.getString("location_address").none{it.isISOControl()}&&inner.has("location"))
         if(kind in listOf("text","html")) {
             require(fid.isEmpty()&&!inner.has("file")) { "文字消息不应包含附件" };return
         }

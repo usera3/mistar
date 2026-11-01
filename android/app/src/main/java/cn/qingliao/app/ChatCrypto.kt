@@ -171,7 +171,7 @@ object ChatCrypto {
         val maximum=if(inner.getString("type")=="html")50000 else 5000
         require(inner.getString("text").length<=maximum) { "消息过长" }
         p.optJSONObject("private_file")?.let { inner.put("file",it) }
-        p.optJSONObject("quote")?.let{inner.put("quote",it)};p.optJSONObject("location")?.let{inner.put("location",it)}
+        p.optJSONObject("quote")?.let{inner.put("quote",it)};p.optJSONObject("location")?.let{inner.put("location",it)};for(key in listOf("location_role","location_source","location_address"))if(p.has(key))inner.put(key,p.get(key))
         PayloadRules.validate(inner,fid,setOf(uid,recipient))
         val context="qingliao:message:1:$uid:$recipient:$id:$fid"
         return JSONObject().put("recipient",recipient).put("client_id",id).put("type","encrypted").put("envelope",encrypt(recipient,inner,context)).apply { if(fid.isNotEmpty())put("file_id",fid) }
@@ -180,14 +180,14 @@ object ChatCrypto {
         if(m.optString("group_id").isNotEmpty())return groupIncoming(m)
         if(m.optString("type")!="encrypted")return m
         val result=JSONObject(m.toString())
-        for(name in listOf("type","text","file","quote","e2ee","decrypt_failed","pending","send_state","send_error","local_cache","withdrawn","location"))result.remove(name)
+        for(name in listOf("type","text","file","quote","e2ee","decrypt_failed","pending","send_state","send_error","local_cache","withdrawn","location","location_role","location_source","location_address"))result.remove(name)
         try {
             val sender=m.getString("sender");val recipient=m.getString("recipient");val fid=if(m.isNull("file_id"))"" else m.optString("file_id")
             val context="qingliao:message:1:$sender:$recipient:${m.getString("client_id")}:$fid"
             val inner=decrypt(m.getJSONObject("envelope"),sender,recipient,context)
             PayloadRules.validate(inner,fid,setOf(sender,recipient))
             result.put("type",inner.getString("type")).put("text",inner.optString("text")).put("e2ee",true)
-            inner.optJSONObject("quote")?.let{result.put("quote",it)};inner.optJSONObject("location")?.let{result.put("location",it)}
+            inner.optJSONObject("quote")?.let{result.put("quote",it)};inner.optJSONObject("location")?.let{result.put("location",it)};for(key in listOf("location_role","location_source","location_address"))if(inner.has(key))result.put(key,inner.get(key))
             if(fid.isNotEmpty()) {
                 val f=inner.getJSONObject("file");require(f.getString("id")==fid)
                 result.put("file",f.put("available",m.optBoolean("attachment_available",true)))
@@ -227,7 +227,7 @@ object ChatCrypto {
         if(epoch!=p.optInt("group_epoch"))throw ApiFailure(409,"群成员已变化，请打开群资料后重试这条消息")
         val client=p.getString("client_id");require(java.util.UUID.fromString(client).toString()==client)
         val fid=p.optString("file_id");val inner=JSONObject().put("type",p.getString("type")).put("text",p.optString("text"))
-        p.optJSONObject("private_file")?.let{inner.put("file",it)};p.optJSONObject("quote")?.let{inner.put("quote",it)};p.optJSONObject("location")?.let{inner.put("location",it)}
+        p.optJSONObject("private_file")?.let{inner.put("file",it)};p.optJSONObject("quote")?.let{inner.put("quote",it)};p.optJSONObject("location")?.let{inner.put("location",it)};for(key in listOf("location_role","location_source","location_address"))if(p.has(key))inner.put(key,p.get(key))
         PayloadRules.validate(inner,fid);val content=inner.toString().toByteArray(utf)
         val context="qingliao:group-message:1:$gid:$epoch:$me:$client:$fid"
         return groupSeal(gid,epoch,context,content,roster).put("client_id",client).put("file_id",fid).put("epoch",epoch)
@@ -253,7 +253,7 @@ object ChatCrypto {
 
     private fun groupIncoming(m:JSONObject):JSONObject {
         if(m.optString("type")!="encrypted")return m
-        val result=JSONObject(m.toString());for(key in listOf("type","text","file","quote","e2ee","decrypt_failed","pending","send_state","send_error","local_cache","withdrawn","location"))result.remove(key)
+        val result=JSONObject(m.toString());for(key in listOf("type","text","file","quote","e2ee","decrypt_failed","pending","send_state","send_error","local_cache","withdrawn","location","location_role","location_source","location_address"))result.remove(key)
         try{
             val gid=m.getString("group_id");val me=Hub.me.getString("id");val sender=m.getString("sender");val epoch=m.getInt("group_epoch")
             require(ChatAddress.group(gid)&&ChatAddress.person(sender)&&m.getString("recipient")==me&&epoch>0)
@@ -263,7 +263,7 @@ object ChatCrypto {
             PayloadRules.validate(inner,fid)
             result.put("type",inner.getString("type")).put("text",inner.optString("text")).put("e2ee",true)
             result.put("group_recipients",JSONArray(ids))
-            inner.optJSONObject("quote")?.let{result.put("quote",it)};inner.optJSONObject("location")?.let{result.put("location",it)}
+            inner.optJSONObject("quote")?.let{result.put("quote",it)};inner.optJSONObject("location")?.let{result.put("location",it)};for(key in listOf("location_role","location_source","location_address"))if(inner.has(key))result.put(key,inner.get(key))
             if(fid.isNotEmpty())result.put("file",inner.getJSONObject("file").put("available",m.optBoolean("attachment_available",true)))
         }catch(_:Exception){result.put("type","text").put("text","[加密群消息暂时无法读取，请检查聊天身份]").put("decrypt_failed",true);result.remove("file");result.remove("quote");result.remove("location")}
         result.remove("envelope");return result

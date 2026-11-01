@@ -346,6 +346,9 @@ object Hub {
     private fun handle(p: JSONObject) {
         when (p.optString("event")) {
             "location.closed"->LocationSessions.close(p.optString("share_id"))
+            "location.started"->LocationSessions.remember(JSONObject().put("share",p.getJSONObject("share")).put("user",p.optJSONObject("user")))
+            "message.updated"->p.optJSONObject("message")?.let{LocationSessions.observeMeeting(it)}
+            "message.deleted"->LocationSessions.removeMeeting(p.optString("id"))
             "group.removed"->{val id=p.optString("group_id");GroupDirectory.removed(id,p.optInt("epoch"));app.getSystemService(NotificationManager::class.java).cancel(id.hashCode())}
             "app.update" -> AppUpdates.check(hint=p.optInt("version_code"))
             "error" -> if(p.optString("code") in listOf("call_busy","self_busy")) {
@@ -362,6 +365,7 @@ object Hub {
             "presence" -> if (p.optJSONObject("user")?.optBoolean("online") != true) typingUntil.remove(p.optJSONObject("user")?.optString("id"))
             "message" -> {
                 val m = p.getJSONObject("message")
+                LocationSessions.observeMeeting(m)
                 typingUntil.remove(m.optString("sender"))
                 val conversation=ChatAddress.peer(m,me.optString("id"))
                 if (m.optString("sender") != me.optString("id") && conversation.isNotEmpty() && (!foreground || viewingPeer != conversation)) {

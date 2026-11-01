@@ -13,6 +13,9 @@ class Glyph(context: Context, private var kind: String, var color: Int = Color.r
         fun line(vararg xy: Float) { val path = Path(); path.moveTo(xy[0], xy[1]); for (i in 2 until xy.size step 2) path.lineTo(xy[i], xy[i+1]); c.drawPath(path, p) }
         fun round(l: Float,t: Float,r: Float,b: Float,rad:Float=3f) { c.drawRoundRect(l,t,r,b,rad,rad,p) }
         when (kind) {
+            "power"->{c.drawArc(4f,4f,20f,22f,-48f,276f,false,p);line(12f,2f,12f,12f)}
+            "target"->{c.drawCircle(12f,12f,7f,p);c.drawCircle(12f,12f,2.5f,p);line(12f,1f,12f,5f);line(12f,19f,12f,23f);line(1f,12f,5f,12f);line(19f,12f,23f,12f)}
+            "flag"->{line(5f,22f,5f,3f,20f,3f,16f,8f,20f,13f,5f,13f)}
             "location" -> {val path=Path();path.moveTo(12f,22f);path.cubicTo(8f,17f,4f,12f,4f,8f);path.cubicTo(4f,-1f,20f,-1f,20f,8f);path.cubicTo(20f,12f,16f,17f,12f,22f);c.drawPath(path,p);c.drawCircle(12f,8f,3f,p)}
             "home" -> { line(2f,11f,12f,3f,22f,11f);line(5f,10f,5f,21f,19f,21f,19f,10f);line(10f,21f,10f,14f,14f,14f,14f,21f) }
             "minimize" -> { round(3f,4f,21f,20f,2f);round(12f,12f,19f,18f,1f) }

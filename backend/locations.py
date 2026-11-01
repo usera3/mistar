@@ -70,7 +70,25 @@ class Locations:
         now=time.monotonic()
         share=dict(id=sid,owner=uid,peer=peer,members=members,epoch=epoch,duration=duration,until=self.c['now']()+duration*1000,deadline=now+duration,touched=now,last=0,seq=0,wire=None,session=hashlib.sha256(token.encode()).hexdigest())
         self.shares[sid]=share
+        for viewer in sorted(members):
+            await self.c['emit'](viewer,dict(event='location.started',share=self.public(share),user=self.c['social'].person(uid,viewer)))
         return web.json_response(dict(share=self.public(share)),status=201)
+
+    async def room(self, request):
+        uid=request['uid'];peer=request.query.get('peer','')
+        self.c['limited']('location-room:'+uid,60,60)
+        if not isinstance(peer,str):self.reject('聊天参数不正确',400)
+        self.audience(uid,peer)
+        for share in list(self.shares.values()):
+            if not self.valid(share):await self.close(share,'ended')
+        self.audience(uid,peer)
+        result=[]
+        for share in list(self.shares.values()):
+            same=share['peer']==peer if self.c['groups'].is_id(peer) else {share['owner'],share['peer']}=={uid,peer}
+            if not same or uid not in share['members']:continue
+            if not self.valid(share):continue
+            result.append(dict(share=self.public(share),user=self.c['social'].person(share['owner'],uid),update=self.dto(share,uid) if share['wire'] else None))
+        return web.json_response(dict(shares=result[:20]))
 
     def dto(self, share, viewer):
         p=share['wire'];value=dict(sender=share['owner'],recipient=viewer,type='encrypted',text='',share_id=share['id'],seq=share['seq'],peer=share['peer'],until=share['until'],epoch=share['epoch'])
@@ -127,6 +145,7 @@ class Locations:
 
     def routes(self, app):
         app.router.add_post('/api/locations',self.create)
+        app.router.add_get('/api/locations',self.room)
         app.router.add_route('GET','/api/locations/{sid}',self.item)
         app.router.add_route('PUT','/api/locations/{sid}',self.item)
         app.router.add_route('DELETE','/api/locations/{sid}',self.item)

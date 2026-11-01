@@ -36,10 +36,16 @@ async def main():
             def context(meta,n):return f"qingliao:location:1:{meta['id']}:{n}:{meta['owner']}:{meta['peer']}:{meta['epoch']}"
             def private_wire(meta,n):return dict(envelope=dict(v=1,context=context(meta,n),sender_key=s.security.identity_for(aid)['key_id'],recipient_key=s.security.identity_for(meta['peer'])['key_id'],sender_cipher=encoded('opaque-sender-cipher'),recipient_cipher=encoded('opaque-recipient-cipher'),signature=encoded('opaque-test-signature')))
             ws=await client.ws_connect('/ws');await ws.send_json(dict(token=bob['token']));assert (await ws.receive_json())['event']=='ready'
+            await get('/locations?peer='+aid,outsider,status=403);checks+=1
+            other=(await api('/locations',request(aid),bob,status=201))['share'];started=await ws.receive_json(timeout=3);assert started['event']=='location.started' and started['share']['owner']==bob['user']['id'];checks+=1
+            room=await get('/locations?peer='+bob['user']['id'],alice);assert len(room['shares'])==2 and {r['share']['owner'] for r in room['shares']}=={aid,bob['user']['id']} and all('email' not in r['user'] and r['update'] is None for r in room['shares']);checks+=1
+            assert len((await get('/locations?peer='+aid,bob))['shares'])==2;checks+=1
+            await api('/locations/'+other['id'],user=bob,method='DELETE');assert (await ws.receive_json(timeout=3))['event']=='location.closed'
             before=s.row('SELECT count(*) AS n FROM messages')['n'];await api('/locations/'+sid,dict(seq=1,wire=private_wire(share,1)),alice,method='PUT');event=await ws.receive_json(timeout=3)
             assert event['event']=='location.live' and event['update']['recipient']==bob['user']['id'] and 'lat' not in event['update']
             assert s.row('SELECT count(*) AS n FROM messages')['n']==before;checks+=1
             assert (await get('/locations/'+sid,bob))['update']['seq']==1;await api('/locations/'+sid,dict(seq=1,wire=private_wire(share,1)),alice,status=409,method='PUT');checks+=1
+            room=await get('/locations?peer='+aid,bob);assert room['shares'][0]['update']['recipient']==bob['user']['id'] and room['shares'][0]['update']['seq']==1;checks+=1
             s.locations.shares[sid]['last']=0;await api('/locations/'+sid,dict(seq=2,wire=private_wire(share,1)),alice,status=400,method='PUT')
             bad=private_wire(share,2);bad['envelope']['recipient_cipher']='x'*10000;await api('/locations/'+sid,dict(seq=2,wire=bad),alice,status=400,method='PUT');checks+=1
             await api('/locations/'+sid,dict(seq=2,wire={'padding':'x'*140000}),alice,status=413,method='PUT');checks+=1
@@ -51,6 +57,7 @@ async def main():
             ws=await client.ws_connect('/ws');await ws.send_json(dict(token=bob['token']));assert (await ws.receive_json())['event']=='ready'
             before=s.row('SELECT count(*) AS n FROM group_messages')['n'];await api('/locations/'+sid,dict(seq=1,wire=group_wire(share,1)),alice,method='PUT');dto=(await ws.receive_json(timeout=3))['update']
             assert dto['envelope']['cipher']==encoded('opaque-distinct-'+bob['user']['id']) and 'envelopes' not in dto['envelope'];assert s.row('SELECT count(*) AS n FROM group_messages')['n']==before;checks+=1
+            room=await get('/locations?peer='+gid,bob);assert len(room['shares'])==1 and room['shares'][0]['update']['envelope']['cipher']==dto['envelope']['cipher'];await get('/locations?peer='+gid,outsider,status=403);checks+=1
             s.locations.shares[sid]['last']=0;wrong=group_wire(share,2);wrong['envelopes'].pop(carl['user']['id']);await api('/locations/'+sid,dict(seq=2,wire=wrong),alice,status=409,method='PUT');checks+=1
             await api('/groups/'+gid+'/members',dict(action='remove',member=carl['user']['id'],epoch=group['epoch']),alice);await s.locations.tick();assert sid not in s.locations.shares
             await get('/locations/'+sid,bob,status=404);await get('/locations/'+sid,carl,status=404);await ws.close();checks+=1

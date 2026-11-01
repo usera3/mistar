@@ -103,6 +103,7 @@ internal object GroupsTests {
             check(ChatCrypto.incoming(message).getString("text")=="真实签名与多成员密文验证");checks++
             val location=LocationPayload.from(android.location.Location("synthetic").apply{latitude=35.7;longitude=139.7;accuracy=10f;time=System.currentTimeMillis()},false)
             val staticWire=ChatCrypto.outgoing(LocationPayload.packet(location,unit).put("group_epoch",1));check(!staticWire.toString().contains("35.7")&&ChatCrypto.incoming(dto(unit,owner,staticWire)).getJSONObject("location").getDouble("lat")==35.7);checks++
+            val meetingWire=ChatCrypto.outgoing(LocationPayload.packet(location,unit).put("group_epoch",1).put("location_role","meeting").put("location_source","map").put("location_address","合成地点地址"));val meetingMessage=ChatCrypto.incoming(dto(unit,owner,meetingWire));check(meetingMessage.getString("location_role")=="meeting"&&meetingMessage.getString("location_source")=="map"&&meetingMessage.getString("location_address")=="合成地点地址");checks++
             val share=JSONObject().put("id",UUID.randomUUID().toString()).put("owner",owner).put("peer",unit).put("epoch",1).put("until",System.currentTimeMillis()+3600000)
             val liveLocation=JSONObject(location.toString()).put("live_id",share.getString("id")).put("until",share.getLong("until"));val liveWire=ChatCrypto.sealLocation(share,1,liveLocation)
             val liveEnvelope=dto(unit,owner,JSONObject(liveWire.toString()).put("client_id",UUID.randomUUID().toString()).put("epoch",1)).getJSONObject("envelope")

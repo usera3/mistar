@@ -23,7 +23,7 @@ internal class ChatInputPanel(context:Context,p:ThemePalette,private val input:E
             val tab=u.link(title,"composer.tab.$key"){show(key)}.apply{minWidth=u.dp(52)};tabs[key]=tab;header.addView(tab,u.lp(-2,if(u.compact)40 else 44))
         }
         header.addView(View(context),LinearLayout.LayoutParams(0,1,1f));header.addView(u.icon("close","收起输入面板"){hide()}.apply{tag="composer.panel.close"},u.lp(40,40));addView(header,u.lp())
-        addView(ScrollView(context).apply{isVerticalScrollBarEnabled=false;addView(content)},u.lp(-1,if(u.compact)110 else 170));addView(note,u.lp())
+        addView(ScrollView(context).apply{isVerticalScrollBarEnabled=false;addView(content)},u.lp(-1,if(u.compact)110 else 196));addView(note,u.lp())
     }
     fun toggle(next:String){if(mode==next&&opened)hide()else show(next)}
     fun hide(){if(mode.isEmpty()&&visibility==View.GONE)return;mode="";visibility=View.GONE;content.removeAllViews();note.visibility=View.GONE;changed()}
@@ -35,14 +35,14 @@ internal class ChatInputPanel(context:Context,p:ThemePalette,private val input:E
         changed();Motion.reveal(content,y=3f,duration=140)
     }
     private fun tools(){
-        val columns=if(u.compact)2 else 3
+        val columns=if(u.compact)2 else 4
         actions.chunked(columns).forEach{group->
             val row=u.row()
             for(n in 0 until columns){val action=group.getOrNull(n)
-                val cell=u.col().apply{gravity=Gravity.CENTER;minimumHeight=u.dp(if(u.compact)64 else 76);setPadding(u.dp(3),u.dp(6),u.dp(3),u.dp(6))}
+                val cell=u.col().apply{gravity=Gravity.CENTER;minimumHeight=u.dp(if(u.compact)70 else 84);setPadding(u.dp(3),u.dp(6),u.dp(3),u.dp(6))}
                 if(action!=null){
-                    cell.tag="composer.action.${action.kind}";cell.contentDescription=action.title;cell.isFocusable=true;u.touch(cell);cell.background=BrandUi.rounded(context,u.p.surface,16)
-                    cell.addView(Glyph(context,action.kind,u.p.accent),u.lp(22,22));u.gap(cell,6);cell.addView(u.text(action.title,12f,u.p.ink).apply{gravity=Gravity.CENTER;maxLines=2},u.lp())
+                    cell.tag="composer.action.${action.kind}";cell.contentDescription=action.title;cell.isFocusable=true;u.touch(cell);cell.background=null
+                    val mark=FrameLayout(context).apply{background=BrandUi.rounded(context,u.p.surface,14);addView(Glyph(context,action.kind,u.p.ink),FrameLayout.LayoutParams(u.dp(26),u.dp(26),Gravity.CENTER))};cell.addView(mark,u.lp(if(u.compact)44 else 52,if(u.compact)44 else 52));u.gap(cell,7);cell.addView(u.text(action.title,12f,u.p.muted).apply{gravity=Gravity.CENTER;maxLines=2},u.lp())
                     cell.isEnabled=action.enabled();cell.alpha=if(cell.isEnabled)1f else .4f
                     cell.setOnClickListener{if(valid()&&action.enabled()){hide();action.run()}}
                 };row.addView(cell,LinearLayout.LayoutParams(0,-2,1f).apply{setMargins(u.dp(3),u.dp(3),u.dp(3),u.dp(3))})

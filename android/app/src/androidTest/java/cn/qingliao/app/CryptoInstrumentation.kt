@@ -22,6 +22,7 @@ class CryptoInstrumentation:Instrumentation() {
     override fun onStart() {
         try {
             waitForIdleSync()
+            if(mode in setOf("mapBaseline","mapCompat")){val result=MapCompatibilityTests.run(this,mode=="mapBaseline");finish(Activity.RESULT_OK,Bundle().apply{putString("result",result)});return}
             if(mode=="location"){val result=LocationTests.run(this,peer);finish(Activity.RESULT_OK,Bundle().apply{putString("result",result)});return}
             if(mode=="groups"){val result=GroupsTests.run(this,peer);finish(Activity.RESULT_OK,Bundle().apply{putString("result",result)});return}
             if(mode=="codeLogin"){val result=CodeLoginTests.run(this,peer);finish(Activity.RESULT_OK,Bundle().apply{putString("result",result)});return}

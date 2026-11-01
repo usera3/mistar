@@ -1155,14 +1155,15 @@ class MainActivity : Activity() {
         inputPanel=ChatInputPanel(this,palette,editor,{
             Hub.token==session&&Hub.me.optString("id")==owner&&peer?.optString("id")==target&&composer===editor&&!callScreen&&!isDestroyed&&!isFinishing
         },listOf(
-            ChatInputPanel.Action("image","图片"){pickFile("image")},
-            ChatInputPanel.Action("file","文件"){pickFile("file")},
+            ChatInputPanel.Action("phone","语音通话",{recording==null&&Hub.call==null}){beginCall(false)},
+            ChatInputPanel.Action("video","视频通话",{recording==null&&Hub.call==null}){beginCall(true)},
             ChatInputPanel.Action("location","位置"){shareLocation()},
-            ChatInputPanel.Action("mic","录制语音",{Hub.call==null&&recording==null}){startRecordingScoped()},
+            ChatInputPanel.Action("file","文件"){pickFile("file")},
+            ChatInputPanel.Action("image","图片"){pickFile("image")},
+            ChatInputPanel.Action("mic","语音消息",{Hub.call==null&&recording==null}){startRecordingScoped()},
             ChatInputPanel.Action("dictate","语音输入",{Hub.call==null&&recording==null}){startDictation()},
-            ChatInputPanel.Action("code","HTML 卡片"){htmlEditor()},
-            ChatInputPanel.Action("video","音视频通话",{recording==null}){chatMenu()}
-        ).filterNot{ChatAddress.group(u.optString("id"))&&it.kind=="video"}){root.post{if(!isDestroyed)updateCompactChat()}}
+            ChatInputPanel.Action("code","HTML 卡片"){htmlEditor()}
+        ).filterNot{ChatAddress.group(u.optString("id"))&&it.kind in setOf("video","phone")}){root.post{if(!isDestroyed)updateCompactChat()}}
         compose.addView(inputPanel,lp());root.addView(compose);composerPanel=compose;composerOwner=owner;composerSession=session;composerPeer=target;restoreDraft();renderMessages();loadVoiceTexts()
         renderRecordingUi()
     }
@@ -1189,14 +1190,16 @@ class MainActivity : Activity() {
     private fun sendMenu(){toggleInputPanel("more")}
     private fun shareLocation(){
         if(!contactGuard())return
-        locationPeer=peer?.optString("id")?:return;locationOwner=Hub.me.optString("id");locationSession=Hub.token
+        val session=Hub.token;val owner=Hub.me.optString("id");val target=peer?.optString("id")?:return
+        fun valid()=Hub.token==session&&Hub.me.optString("id")==owner&&peer?.optString("id")==target&&resumed&&!callScreen&&!isDestroyed
         hideKeyboard();stopTyping();inputPanel?.hide()
-        startActivityForResult(Intent(this,LocationActivity::class.java).putExtra("peer",locationPeer),86)
+        fun open(mode:String){if(!valid())return;locationPeer=target;locationOwner=owner;locationSession=session;startActivityForResult(Intent(this,LocationActivity::class.java).putExtra("peer",target).putExtra("peer_info",peer.toString()).putExtra("mode",mode),86)}
+        actionSheet=LocationSheets.choose(this,::valid,{open("send")},{open("liveStart")})
     }
     private fun viewLocation(m:JSONObject){
         val value=m.optJSONObject("location")?:return;val target=peer?.optString("id")?:return
         if(!resumed||!Hub.foreground||Hub.token.isEmpty())return
-        startActivity(Intent(this,LocationActivity::class.java).putExtra("peer",target).putExtra("sender",m.optString("sender")).putExtra("location",value.toString()).apply{if(value.has("live_id"))putExtra("live",value.getString("live_id"))})
+        startActivity(Intent(this,LocationActivity::class.java).putExtra("peer",target).putExtra("sender",m.optString("sender")).putExtra("peer_info",peer.toString()).putExtra("address",m.optString("location_address")).putExtra("map_selected",m.optString("location_source")=="map").putExtra("location",value.toString()).apply{if(value.has("live_id"))putExtra("live",value.getString("live_id"))})
     }
 
     private fun startRecordingScoped(){
@@ -1332,7 +1335,7 @@ class MainActivity : Activity() {
         if(!m.optBoolean("attachment_available",true)&&m.optString("type") in listOf("image","file","voice")) {
             bubble.addView(text("云端附件已被删除",14f,bubbleMuted).apply{this.maxWidth=maxWidth})
         } else if(m.optJSONObject("location")!=null&&(m.optBoolean("e2ee")||m.optBoolean("pending"))&&!m.optBoolean("decrypt_failed")){
-            val card=LocationCardView(this,palette,m.getJSONObject("location"),mine,maxWidth){viewLocation(m)};locationCards.add(card);bubble.addView(card)
+            val card=LocationCardView(this,palette,m.getJSONObject("location"),mine,maxWidth,m.optString("location_source")=="map"){viewLocation(m)};locationCards.add(card);bubble.addView(card)
         } else when(m.optString("type")) {
             "text" -> bubble.addView(if(m.optBoolean("decrypt_failed")||m.optBoolean("pending"))text(m.optString("text"),if(compact)14f else 16f,bubbleInk).apply{this.maxWidth=maxWidth}else selectableMessageText(m,if(compact)14f else 16f,bubbleInk,maxWidth))
             "html" -> {
